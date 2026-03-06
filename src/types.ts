@@ -8,15 +8,18 @@ export interface GameConfig {
   terrainResolution: number;
   activeRadius: number;
   unloadRadius: number;
+  glyphDensity: number;
   glyphCellWidth: number;
   glyphCellHeight: number;
   renderScale: number;
   moveSpeed: number;
   mouseSensitivity: number;
+  animationSpeed: number;
   eyeHeight: number;
   maxPitch: number;
   terrainBaseHeight: number;
   terrainHeight: number;
+  terrainContrast: number;
   fixedTimeStep: number;
   maxChunkBuildsPerFrame: number;
   treeCandidatesPerChunk: number;

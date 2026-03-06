@@ -64,6 +64,12 @@ body {
   margin-bottom: 8px;
 }
 
+.hud-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .hud-title {
   font-size: 11px;
   letter-spacing: 0.18em;
@@ -75,6 +81,16 @@ body {
   border: 1px solid rgba(100, 255, 148, 0.22);
   background: rgba(3, 24, 8, 0.86);
   color: #8effa4;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.settings-toggle {
+  border: 1px solid rgba(100, 255, 148, 0.16);
+  background: rgba(2, 18, 6, 0.9);
+  color: rgba(142, 255, 164, 0.88);
   padding: 5px 8px;
   font: inherit;
   font-size: 11px;
@@ -100,6 +116,69 @@ body {
 
 .hud-debug.is-hidden {
   display: none;
+}
+
+.game-settings {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px;
+  border: 1px solid rgba(102, 255, 150, 0.2);
+  background: rgba(0, 12, 4, 0.76);
+  box-shadow:
+    0 0 22px rgba(20, 255, 120, 0.06),
+    inset 0 0 0 1px rgba(120, 255, 160, 0.04);
+}
+
+.game-settings.is-hidden {
+  display: none;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-title {
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(185, 255, 193, 0.92);
+}
+
+.settings-shortcut {
+  font-size: 11px;
+  color: rgba(126, 255, 148, 0.7);
+}
+
+.settings-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.settings-label {
+  font-size: 11px;
+  color: rgba(185, 255, 193, 0.84);
+}
+
+.settings-input {
+  width: 100%;
+  accent-color: #7eff94;
+}
+
+.settings-value {
+  min-width: 68px;
+  text-align: right;
+  font-size: 11px;
+  color: rgba(126, 255, 148, 0.82);
 }
 
 .game-overlay {

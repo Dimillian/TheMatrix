@@ -111,7 +111,7 @@ export class GlyphRenderer {
   }
 
   private drawGlyphs(deltaTime: number): void {
-    this.elapsedTime += deltaTime;
+    this.elapsedTime += deltaTime * this.config.animationSpeed;
     this.context.fillStyle = BACKGROUND_COLOR;
     this.context.fillRect(0, 0, this.width, this.height);
 
@@ -129,13 +129,19 @@ export class GlyphRenderer {
         const localAverage = this.computeNeighborhoodBrightness(sampleX, sampleY, sourceWidth, sourceHeight);
         const edge = this.computeEdge(sampleX, sampleY, sourceWidth, sourceHeight);
         const inverseDepth = 1 - depth;
-        const worldSignal = Math.max(
+        const rawWorldSignal = Math.max(
           0,
           brightness * 0.55 +
             localAverage * 0.4 +
             inverseDepth * 0.24 +
             edge * 0.8 -
             0.14,
+        );
+
+        const worldSignal = THREE.MathUtils.clamp(
+          (rawWorldSignal - 0.05) * (0.85 + this.config.terrainContrast * 0.95) + 0.05,
+          0,
+          1,
         );
 
         if (worldSignal < 0.055) {
