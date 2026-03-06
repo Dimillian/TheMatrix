@@ -9,6 +9,15 @@ export const GLYPH_RENDER_MODE_LABELS: Record<GlyphRenderMode, string> = {
   rain: 'Rain Mask',
 };
 
+export const WORLD_MODES = ['terrain', 'interior'] as const;
+
+export type WorldMode = (typeof WORLD_MODES)[number];
+
+export const WORLD_MODE_LABELS: Record<WorldMode, string> = {
+  terrain: 'Terrain',
+  interior: 'Interior',
+};
+
 export interface GameConfig {
   seed: number;
   spawnX: number;
@@ -30,6 +39,7 @@ export interface GameConfig {
   terrainHeight: number;
   terrainContrast: number;
   renderMode: GlyphRenderMode;
+  worldMode: WorldMode;
   fixedTimeStep: number;
   maxChunkBuildsPerFrame: number;
   treeCandidatesPerChunk: number;
@@ -61,8 +71,6 @@ export interface ChunkData {
   coord: ChunkCoord;
   key: string;
   group: THREE.Group;
-  terrainMesh: THREE.Mesh;
-  treeInstances: TreeInstanceData[];
   bounds: THREE.Box3;
   lastTouchedFrame: number;
 }

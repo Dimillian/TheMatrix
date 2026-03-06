@@ -4,6 +4,9 @@ import {
   GLYPH_RENDER_MODES,
   type GameConfig,
   type GlyphRenderMode,
+  WORLD_MODE_LABELS,
+  WORLD_MODES,
+  type WorldMode,
 } from '../types.ts';
 import { createGameConfig } from '../config.ts';
 import { GlyphRenderer } from '../render/GlyphRenderer.ts';
@@ -20,6 +23,7 @@ export class Game {
   private readonly hudDebug: HTMLPreElement;
   private readonly hudToggle: HTMLButtonElement;
   private readonly renderModeToggle: HTMLButtonElement;
+  private readonly worldModeToggle: HTMLButtonElement;
   private readonly settingsPanel: HTMLDivElement;
   private readonly settingsToggle: HTMLButtonElement;
   private readonly glyphDensityInput: HTMLInputElement;
@@ -61,6 +65,7 @@ export class Game {
             <div class="hud-actions">
               <button class="hud-toggle" type="button" aria-pressed="false">P Debug: Off</button>
               <button class="render-mode-toggle" type="button">R Render: Classic</button>
+              <button class="world-mode-toggle" type="button">T World: Terrain</button>
               <button class="settings-toggle" type="button" aria-pressed="false">O Settings: Off</button>
             </div>
           </div>
@@ -102,7 +107,7 @@ export class Game {
           <div class="overlay-card">
             <h1>The Matrix</h1>
             <p>Click to enter the stream. Use WASD to move and the mouse to look around. Press Esc to release the pointer.</p>
-            <p>Press P for debug info, R to switch render mode, and O for runtime settings.</p>
+            <p>Press P for debug info, R to switch render mode, T to switch world, and O for runtime settings.</p>
             <p class="overlay-status">Click anywhere on this panel to start.</p>
           </div>
         </div>
@@ -116,6 +121,7 @@ export class Game {
     const hudDebug = root.querySelector<HTMLPreElement>('.hud-debug');
     const hudToggle = root.querySelector<HTMLButtonElement>('.hud-toggle');
     const renderModeToggle = root.querySelector<HTMLButtonElement>('.render-mode-toggle');
+    const worldModeToggle = root.querySelector<HTMLButtonElement>('.world-mode-toggle');
     const settingsPanel = root.querySelector<HTMLDivElement>('.game-settings');
     const settingsToggle = root.querySelector<HTMLButtonElement>('.settings-toggle');
     const glyphDensityInput = root.querySelector<HTMLInputElement>('[data-setting="glyphDensity"]');
@@ -139,6 +145,7 @@ export class Game {
       !hudDebug ||
       !hudToggle ||
       !renderModeToggle ||
+      !worldModeToggle ||
       !settingsPanel ||
       !settingsToggle ||
       !glyphDensityInput ||
@@ -162,6 +169,7 @@ export class Game {
     this.hudDebug = hudDebug;
     this.hudToggle = hudToggle;
     this.renderModeToggle = renderModeToggle;
+    this.worldModeToggle = worldModeToggle;
     this.settingsPanel = settingsPanel;
     this.settingsToggle = settingsToggle;
     this.glyphDensityInput = glyphDensityInput;
@@ -183,6 +191,7 @@ export class Game {
     this.shell.addEventListener('click', this.handleStartClick);
     this.hudToggle.addEventListener('click', this.handleHudToggle);
     this.renderModeToggle.addEventListener('click', this.handleRenderModeToggle);
+    this.worldModeToggle.addEventListener('click', this.handleWorldModeToggle);
     this.settingsToggle.addEventListener('click', this.handleSettingsToggle);
     hud.addEventListener('click', this.stopShellClickPropagation);
     hud.addEventListener('pointerdown', this.stopShellClickPropagation);
@@ -197,7 +206,6 @@ export class Game {
     this.input.onPointerLockError = this.handlePointerLockError;
 
     this.camera.rotation.order = 'YXZ';
-    this.scene.fog = new THREE.Fog(0x020805, 28, this.config.chunkSize * (this.config.activeRadius + 1.1));
     this.scene.background = new THREE.Color(0x010302);
 
     const hemi = new THREE.HemisphereLight(0xa8ffc3, 0x06210d, 0.7);
@@ -206,17 +214,12 @@ export class Game {
     directional.position.set(-18, 30, 10);
     this.scene.add(hemi, ambient, directional);
 
-    this.controller.setSpawn(
-      this.config.spawnX,
-      this.config.spawnZ,
-      this.world.getHeightAt(this.config.spawnX, this.config.spawnZ),
-    );
-
     window.addEventListener('resize', this.handleResize);
     window.addEventListener('keydown', this.handleKeyDown);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);
     this.initializeSettingsPanel();
-    this.applyViewDistance();
+    this.applyWorldEnvironment();
+    this.resetSpawnToCurrentWorld();
     this.updateHud(0);
     this.handleResize();
   }
@@ -235,6 +238,7 @@ export class Game {
     this.shell.removeEventListener('click', this.handleStartClick);
     this.hudToggle.removeEventListener('click', this.handleHudToggle);
     this.renderModeToggle.removeEventListener('click', this.handleRenderModeToggle);
+    this.worldModeToggle.removeEventListener('click', this.handleWorldModeToggle);
     this.settingsToggle.removeEventListener('click', this.handleSettingsToggle);
     this.glyphDensityInput.removeEventListener('input', this.handleGlyphDensityInput);
     this.animationSpeedInput.removeEventListener('input', this.handleAnimationSpeedInput);
@@ -266,6 +270,10 @@ export class Game {
     this.applyRenderMode(this.getNextRenderMode());
   };
 
+  private readonly handleWorldModeToggle = (): void => {
+    this.applyWorldMode(this.getNextWorldMode());
+  };
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'KeyP') {
       event.preventDefault();
@@ -285,6 +293,12 @@ export class Game {
     if (event.code === 'KeyR') {
       event.preventDefault();
       this.applyRenderMode(this.getNextRenderMode());
+      return;
+    }
+
+    if (event.code === 'KeyT') {
+      event.preventDefault();
+      this.applyWorldMode(this.getNextWorldMode());
     }
   };
 
@@ -312,7 +326,7 @@ export class Game {
   private readonly handleViewDistanceInput = (): void => {
     this.config.activeRadius = Number(this.viewDistanceInput.value);
     this.config.unloadRadius = this.config.activeRadius + 1;
-    this.applyViewDistance();
+    this.applyWorldEnvironment();
     this.updateSettingsPanelValues();
     this.updateHud(0);
   };
@@ -384,20 +398,24 @@ export class Game {
     const worldStats = this.world.getDebugStats();
     const renderStats = this.glyphRenderer.getDebugStats();
     const renderModeLabel = this.glyphRenderer.getRenderModeLabel();
+    const worldModeLabel = WORLD_MODE_LABELS[this.config.worldMode];
+    const spawn = this.world.getSpawnPoint();
 
     this.hudSummary.textContent = [
       `XYZ   ${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`,
       `FPS   ${this.fps.toFixed(0)}`,
       `Seed  ${this.config.seed}`,
+      `World ${worldModeLabel}`,
       `Mode  ${renderModeLabel}`,
       `P     ${this.debugHudVisible ? 'hide debug' : 'show debug'}`,
       `R     next render mode`,
+      `T     next world`,
       `O     ${this.settingsVisible ? 'hide settings' : 'show settings'}`,
     ].join('\n');
 
     this.hudDebug.textContent = [
       `Chunk        ${chunk.x}, ${chunk.z}`,
-      `Spawn        ${this.config.spawnX}, ${this.config.spawnZ}`,
+      `Spawn        ${spawn.x.toFixed(0)}, ${spawn.z.toFixed(0)}`,
       `Chunks live  ${worldStats.activeChunks}`,
       `Queue        ${worldStats.queuedChunks}`,
       `Glyph grid   ${renderStats.columns} x ${renderStats.rows}`,
@@ -417,6 +435,11 @@ export class Game {
     this.renderModeToggle.textContent = `R Render: ${renderModeLabel}`;
   }
 
+  private syncWorldModeControls(): void {
+    const worldModeLabel = WORLD_MODE_LABELS[this.config.worldMode];
+    this.worldModeToggle.textContent = `T World: ${worldModeLabel}`;
+  }
+
   private syncSettingsVisibility(): void {
     this.settingsToggle.textContent = this.settingsVisible ? 'O Settings: On' : 'O Settings: Off';
     this.settingsToggle.setAttribute('aria-pressed', String(this.settingsVisible));
@@ -432,6 +455,7 @@ export class Game {
     this.updateSettingsPanelValues();
     this.syncSettingsVisibility();
     this.syncRenderModeControls();
+    this.syncWorldModeControls();
   }
 
   private updateSettingsPanelValues(): void {
@@ -450,10 +474,19 @@ export class Game {
     this.glyphRenderer.resize(window.innerWidth, window.innerHeight);
   }
 
-  private applyViewDistance(): void {
+  private applyWorldEnvironment(): void {
+    if (this.config.worldMode === 'interior') {
+      const fogFar = this.config.chunkSize * (this.config.activeRadius + 0.75);
+      const fogNear = Math.max(10, fogFar * 0.18);
+      this.scene.fog = new THREE.Fog(0x010804, fogNear, fogFar);
+      this.scene.background = new THREE.Color(0x010403);
+      return;
+    }
+
     const fogFar = this.config.chunkSize * (this.config.activeRadius + 1.1);
     const fogNear = Math.max(16, fogFar * 0.22);
     this.scene.fog = new THREE.Fog(0x020805, fogNear, fogFar);
+    this.scene.background = new THREE.Color(0x010302);
   }
 
   private applyRenderMode(mode: GlyphRenderMode): void {
@@ -466,5 +499,25 @@ export class Game {
     const currentIndex = GLYPH_RENDER_MODES.indexOf(this.config.renderMode);
     const nextIndex = (currentIndex + 1) % GLYPH_RENDER_MODES.length;
     return GLYPH_RENDER_MODES[nextIndex] ?? GLYPH_RENDER_MODES[0];
+  }
+
+  private applyWorldMode(mode: WorldMode): void {
+    this.world.setWorldMode(mode);
+    this.applyWorldEnvironment();
+    this.resetSpawnToCurrentWorld();
+    this.world.update(this.controller.position, this.frame);
+    this.syncWorldModeControls();
+    this.updateHud(0);
+  }
+
+  private getNextWorldMode(): WorldMode {
+    const currentIndex = WORLD_MODES.indexOf(this.config.worldMode);
+    const nextIndex = (currentIndex + 1) % WORLD_MODES.length;
+    return WORLD_MODES[nextIndex] ?? WORLD_MODES[0];
+  }
+
+  private resetSpawnToCurrentWorld(): void {
+    const spawn = this.world.getSpawnPoint();
+    this.controller.setSpawn(spawn.x, spawn.z, this.world.getHeightAt(spawn.x, spawn.z));
   }
 }

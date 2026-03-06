@@ -22,6 +22,7 @@ const SHARED_CONFIG: Omit<GameConfig, 'seed'> = {
   terrainHeight: 26,
   terrainContrast: 0.6,
   renderMode: 'classic',
+  worldMode: 'terrain',
   fixedTimeStep: 1 / 60,
   maxChunkBuildsPerFrame: 2,
   treeCandidatesPerChunk: 30,
