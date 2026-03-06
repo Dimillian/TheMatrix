@@ -4,6 +4,8 @@
 
 Small browser FPS prototype where an infinite procedural landscape is rendered as animated Matrix-style glyphs instead of normal pixels.
 
+Live demo: [dimillian.github.io/TheMatrix](https://dimillian.github.io/TheMatrix/)
+
 ## What It Is
 
 - Desktop-first first-person exploration prototype
