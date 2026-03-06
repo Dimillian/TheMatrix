@@ -2,23 +2,33 @@ import * as THREE from 'three';
 import type { ChunkCoord, ChunkData, GameConfig, TreeInstanceData, WorldMode } from '../types.ts';
 import { chunkKey, chunkOrigin, enumerateChunkRing, worldToChunkCoord } from './chunks.ts';
 import {
-  enumerateInteriorFloorSpans,
-  generateInteriorPropsForChunk,
+  generateInteriorLayoutForChunk,
+  getInteriorSpawnPoint,
+  type InteriorCell,
+  type InteriorEdge,
+  type InteriorLayout,
+  type InteriorPropInstance,
   sampleInteriorHeight,
 } from './interior.ts';
 import { sampleTerrainHeight } from './terrain.ts';
 import { generateTreesForChunk } from './trees.ts';
 
-const INTERIOR_CORRIDOR_WIDTH = 44;
 const INTERIOR_CEILING_CLEARANCE = 8.8;
+const INTERIOR_CEILING_PANEL_HEIGHT = 0.8;
+const INTERIOR_CEILING_STRIP_HEIGHT = 0.14;
+const INTERIOR_CEILING_STRIP_GAP = 0.16;
 const INTERIOR_FLOOR_THICKNESS = 1.2;
 const INTERIOR_WALL_THICKNESS = 1.1;
-const INTERIOR_FRAME_SPACING = 12;
+const INTERIOR_TRIM_THICKNESS = 0.3;
+const INTERIOR_PLAYER_RADIUS = 1.35;
+const INTERIOR_DOOR_CLEAR_WIDTH = 4.8;
+const INTERIOR_DOOR_CLEAR_HEIGHT = 7.2;
 
 export class WorldManager {
   private readonly scene: THREE.Scene;
   private readonly config: GameConfig;
   private readonly chunks = new Map<string, ChunkData>();
+  private readonly interiorLayoutCache = new Map<string, InteriorLayout>();
   private readonly queuedKeys = new Set<string>();
   private readonly generationQueue: ChunkCoord[] = [];
 
@@ -142,6 +152,15 @@ export class WorldManager {
       this.scene.remove(chunk.group);
       this.chunks.delete(key);
     }
+
+    for (const [key, layout] of this.interiorLayoutCache) {
+      const dx = Math.abs(layout.coord.x - playerChunk.x);
+      const dz = Math.abs(layout.coord.z - playerChunk.z);
+
+      if (dx > this.config.unloadRadius + 1 || dz > this.config.unloadRadius + 1) {
+        this.interiorLayoutCache.delete(key);
+      }
+    }
   }
 
   setWorldMode(mode: WorldMode): void {
@@ -155,10 +174,7 @@ export class WorldManager {
 
   getSpawnPoint(): { x: number; z: number } {
     if (this.config.worldMode === 'interior') {
-      return {
-        x: this.config.chunkSize * 0.5,
-        z: 18,
-      };
+      return getInteriorSpawnPoint(this.config);
     }
 
     return {
@@ -173,6 +189,29 @@ export class WorldManager {
     }
 
     return sampleTerrainHeight(x, z, this.config);
+  }
+
+  canOccupy(x: number, z: number): boolean {
+    if (this.config.worldMode !== 'interior') {
+      return true;
+    }
+
+    const samples = [
+      [0, 0],
+      [INTERIOR_PLAYER_RADIUS, 0],
+      [-INTERIOR_PLAYER_RADIUS, 0],
+      [0, INTERIOR_PLAYER_RADIUS],
+      [0, -INTERIOR_PLAYER_RADIUS],
+      [INTERIOR_PLAYER_RADIUS * 0.72, INTERIOR_PLAYER_RADIUS * 0.72],
+      [INTERIOR_PLAYER_RADIUS * 0.72, -INTERIOR_PLAYER_RADIUS * 0.72],
+      [-INTERIOR_PLAYER_RADIUS * 0.72, INTERIOR_PLAYER_RADIUS * 0.72],
+      [-INTERIOR_PLAYER_RADIUS * 0.72, -INTERIOR_PLAYER_RADIUS * 0.72],
+    ];
+
+    return samples.every(([offsetX, offsetZ]) => {
+      const cell = this.getInteriorCellAt(x + offsetX, z + offsetZ);
+      return cell?.walkable ?? false;
+    });
   }
 
   getDebugStats(): { activeChunks: number; queuedChunks: number } {
@@ -204,6 +243,7 @@ export class WorldManager {
     }
 
     this.chunks.clear();
+    this.interiorLayoutCache.clear();
     this.queuedKeys.clear();
     this.generationQueue.length = 0;
   }
@@ -243,130 +283,91 @@ export class WorldManager {
   private buildInteriorChunk(coord: ChunkCoord, frame: number): ChunkData {
     const group = new THREE.Group();
     group.name = `chunk:${this.config.worldMode}:${chunkKey(coord)}`;
+    const layout = this.getInteriorLayout(coord);
 
-    const origin = chunkOrigin(coord, this.config.chunkSize);
-    const centerX = origin.x + this.config.chunkSize * 0.5;
-    const zStart = origin.z;
-    const zEnd = origin.z + this.config.chunkSize;
-    const floorSpans = enumerateInteriorFloorSpans(zStart, zEnd, this.config);
-    const corridorLeft = centerX - INTERIOR_CORRIDOR_WIDTH * 0.5;
-    const corridorRight = centerX + INTERIOR_CORRIDOR_WIDTH * 0.5;
+    for (let z = 0; z < layout.gridSize; z += 1) {
+      for (let x = 0; x < layout.gridSize; x += 1) {
+        const cell = layout.cells[z]?.[x];
 
-    for (const span of floorSpans) {
-      const spanCenterZ = (span.startZ + span.endZ) * 0.5;
-      const spanDepth = Math.max(0.5, span.endZ - span.startZ);
-      const ceilingY = span.height + INTERIOR_CEILING_CLEARANCE;
+        if (!cell?.walkable) {
+          continue;
+        }
 
-      group.add(
-        this.createBox(
-          INTERIOR_CORRIDOR_WIDTH + 8,
-          INTERIOR_FLOOR_THICKNESS,
-          spanDepth,
-          centerX,
-          span.height - INTERIOR_FLOOR_THICKNESS * 0.5,
-          spanCenterZ,
-          this.interiorFloorMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          INTERIOR_CORRIDOR_WIDTH,
-          0.9,
-          spanDepth,
-          centerX,
-          ceilingY,
-          spanCenterZ,
-          this.interiorWallMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          INTERIOR_WALL_THICKNESS,
-          INTERIOR_CEILING_CLEARANCE + 0.9,
-          spanDepth,
-          corridorLeft,
-          span.height + INTERIOR_CEILING_CLEARANCE * 0.5,
-          spanCenterZ,
-          this.interiorWallMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          INTERIOR_WALL_THICKNESS,
-          INTERIOR_CEILING_CLEARANCE + 0.9,
-          spanDepth,
-          corridorRight,
-          span.height + INTERIOR_CEILING_CLEARANCE * 0.5,
-          spanCenterZ,
-          this.interiorWallMaterial,
-        ),
-      );
+        const worldX = layout.origin.x + (x + 0.5) * layout.cellSize;
+        const worldZ = layout.origin.z + (z + 0.5) * layout.cellSize;
+        const ceilingY = layout.floorHeight + INTERIOR_CEILING_CLEARANCE;
+
+        group.add(
+          this.createBox(
+            layout.cellSize + 0.08,
+            INTERIOR_FLOOR_THICKNESS,
+            layout.cellSize + 0.08,
+            worldX,
+            layout.floorHeight - INTERIOR_FLOOR_THICKNESS * 0.5,
+            worldZ,
+            this.interiorFloorMaterial,
+          ),
+        );
+        group.add(
+          this.createBox(
+            layout.cellSize - 0.16,
+            INTERIOR_CEILING_PANEL_HEIGHT,
+            layout.cellSize - 0.16,
+            worldX,
+            ceilingY,
+            worldZ,
+            this.interiorWallMaterial,
+          ),
+        );
+
+        if (cell.kind === 'room') {
+          group.add(
+            this.createBox(
+              layout.cellSize - 1.2,
+              INTERIOR_TRIM_THICKNESS,
+              layout.cellSize - 1.2,
+              worldX,
+              layout.floorHeight + 0.05,
+              worldZ,
+              this.interiorAccentMaterial,
+            ),
+          );
+        } else {
+          const ceilingBottomY = ceilingY - INTERIOR_CEILING_PANEL_HEIGHT * 0.5;
+          const stripCenterY =
+            ceilingBottomY -
+            INTERIOR_CEILING_STRIP_GAP -
+            INTERIOR_CEILING_STRIP_HEIGHT * 0.5;
+
+          group.add(
+            this.createBox(
+              layout.cellSize * 0.62,
+              INTERIOR_CEILING_STRIP_HEIGHT,
+              0.5,
+              worldX,
+              stripCenterY,
+              worldZ,
+              this.interiorAccentMaterial,
+            ),
+          );
+        }
+
+        for (const side of ['north', 'east', 'south', 'west'] as const) {
+          if (!this.hasInteriorOpening(layout, x, z, side)) {
+            group.add(this.createInteriorWallSegment(layout, worldX, worldZ, side));
+          }
+        }
+
+        for (const side of ['east', 'south'] as const) {
+          if (this.shouldPlaceDoorFrame(layout, x, z, side)) {
+            this.addInteriorDoorFrame(group, layout, worldX, worldZ, side);
+          }
+        }
+      }
     }
 
-    const frameStart = Math.ceil(zStart / INTERIOR_FRAME_SPACING) * INTERIOR_FRAME_SPACING;
-    for (let frameZ = frameStart; frameZ < zEnd; frameZ += INTERIOR_FRAME_SPACING) {
-      const floorHeight = sampleInteriorHeight(centerX, frameZ, this.config);
-      const ceilingY = floorHeight + INTERIOR_CEILING_CLEARANCE;
-
-      group.add(
-        this.createBox(
-          0.7,
-          INTERIOR_CEILING_CLEARANCE,
-          0.75,
-          corridorLeft + 0.8,
-          floorHeight + INTERIOR_CEILING_CLEARANCE * 0.5 - 0.05,
-          frameZ,
-          this.interiorAccentMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          0.7,
-          INTERIOR_CEILING_CLEARANCE,
-          0.75,
-          corridorRight - 0.8,
-          floorHeight + INTERIOR_CEILING_CLEARANCE * 0.5 - 0.05,
-          frameZ,
-          this.interiorAccentMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          INTERIOR_CORRIDOR_WIDTH - 1.6,
-          0.55,
-          0.75,
-          centerX,
-          ceilingY - 0.45,
-          frameZ,
-          this.interiorAccentMaterial,
-        ),
-      );
-    }
-
-    const props = generateInteriorPropsForChunk(coord, this.config);
-    for (const prop of props) {
-      group.add(
-        this.createBox(
-          prop.width,
-          prop.height,
-          prop.depth,
-          prop.x,
-          prop.y,
-          prop.z,
-          this.interiorFurnitureMaterial,
-        ),
-      );
-      group.add(
-        this.createBox(
-          Math.max(0.5, prop.width * 0.45),
-          0.22,
-          Math.max(0.45, prop.depth * 0.8),
-          prop.x,
-          prop.y + prop.height * 0.28,
-          prop.z,
-          this.interiorAccentMaterial,
-        ),
-      );
+    for (const prop of layout.props) {
+      this.addInteriorProp(group, prop);
     }
 
     const bounds = new THREE.Box3().setFromObject(group);
@@ -378,6 +379,375 @@ export class WorldManager {
       bounds,
       lastTouchedFrame: frame,
     };
+  }
+
+  private getInteriorLayout(coord: ChunkCoord): InteriorLayout {
+    const key = chunkKey(coord);
+    const cached = this.interiorLayoutCache.get(key);
+
+    if (cached) {
+      return cached;
+    }
+
+    const layout = generateInteriorLayoutForChunk(coord, this.config);
+    this.interiorLayoutCache.set(key, layout);
+    return layout;
+  }
+
+  private getInteriorCellAt(x: number, z: number): InteriorCell | null {
+    const coord = worldToChunkCoord(x, z, this.config.chunkSize);
+    const layout = this.getInteriorLayout(coord);
+    const localX = x - layout.origin.x;
+    const localZ = z - layout.origin.z;
+    const cellX = Math.min(layout.gridSize - 1, Math.max(0, Math.floor(localX / layout.cellSize)));
+    const cellZ = Math.min(layout.gridSize - 1, Math.max(0, Math.floor(localZ / layout.cellSize)));
+
+    return layout.cells[cellZ]?.[cellX] ?? null;
+  }
+
+  private hasInteriorOpening(
+    layout: InteriorLayout,
+    x: number,
+    z: number,
+    side: InteriorEdge,
+  ): boolean {
+    switch (side) {
+      case 'north':
+        return z === 0 ? layout.edgeOpenings.north.includes(x) : Boolean(layout.cells[z - 1]?.[x]?.walkable);
+      case 'south':
+        return z === layout.gridSize - 1
+          ? layout.edgeOpenings.south.includes(x)
+          : Boolean(layout.cells[z + 1]?.[x]?.walkable);
+      case 'west':
+        return x === 0 ? layout.edgeOpenings.west.includes(z) : Boolean(layout.cells[z]?.[x - 1]?.walkable);
+      case 'east':
+        return x === layout.gridSize - 1
+          ? layout.edgeOpenings.east.includes(z)
+          : Boolean(layout.cells[z]?.[x + 1]?.walkable);
+    }
+  }
+
+  private getInteriorNeighbor(
+    layout: InteriorLayout,
+    x: number,
+    z: number,
+    side: InteriorEdge,
+  ): InteriorCell | null {
+    switch (side) {
+      case 'north':
+        return z > 0 ? layout.cells[z - 1]?.[x] ?? null : null;
+      case 'south':
+        return z < layout.gridSize - 1 ? layout.cells[z + 1]?.[x] ?? null : null;
+      case 'west':
+        return x > 0 ? layout.cells[z]?.[x - 1] ?? null : null;
+      case 'east':
+        return x < layout.gridSize - 1 ? layout.cells[z]?.[x + 1] ?? null : null;
+    }
+  }
+
+  private createInteriorWallSegment(
+    layout: InteriorLayout,
+    worldX: number,
+    worldZ: number,
+    side: InteriorEdge,
+  ): THREE.Mesh {
+    const wallHeight = INTERIOR_CEILING_CLEARANCE + 0.9;
+    const centerY = layout.floorHeight + wallHeight * 0.5;
+    const halfCell = layout.cellSize * 0.5;
+
+    switch (side) {
+      case 'north':
+        return this.createBox(
+          layout.cellSize,
+          wallHeight,
+          INTERIOR_WALL_THICKNESS,
+          worldX,
+          centerY,
+          worldZ - halfCell + INTERIOR_WALL_THICKNESS * 0.5,
+          this.interiorWallMaterial,
+        );
+      case 'south':
+        return this.createBox(
+          layout.cellSize,
+          wallHeight,
+          INTERIOR_WALL_THICKNESS,
+          worldX,
+          centerY,
+          worldZ + halfCell - INTERIOR_WALL_THICKNESS * 0.5,
+          this.interiorWallMaterial,
+        );
+      case 'west':
+        return this.createBox(
+          INTERIOR_WALL_THICKNESS,
+          wallHeight,
+          layout.cellSize,
+          worldX - halfCell + INTERIOR_WALL_THICKNESS * 0.5,
+          centerY,
+          worldZ,
+          this.interiorWallMaterial,
+        );
+      case 'east':
+        return this.createBox(
+          INTERIOR_WALL_THICKNESS,
+          wallHeight,
+          layout.cellSize,
+          worldX + halfCell - INTERIOR_WALL_THICKNESS * 0.5,
+          centerY,
+          worldZ,
+          this.interiorWallMaterial,
+        );
+    }
+  }
+
+  private shouldPlaceDoorFrame(
+    layout: InteriorLayout,
+    x: number,
+    z: number,
+    side: 'east' | 'south',
+  ): boolean {
+    if (!this.hasInteriorOpening(layout, x, z, side)) {
+      return false;
+    }
+
+    const cell = layout.cells[z]?.[x];
+    const neighbor = this.getInteriorNeighbor(layout, x, z, side);
+
+    if (!cell || !neighbor?.walkable) {
+      return false;
+    }
+
+    if (cell.kind !== 'room' && neighbor.kind !== 'room') {
+      return false;
+    }
+
+    if (cell.kind === 'room' && cell.roomId !== undefined) {
+      const room = layout.rooms[cell.roomId];
+      return room?.doorway?.x === x && room.doorway?.z === z && room.doorway?.side === side;
+    }
+
+    if (neighbor.kind === 'room' && neighbor.roomId !== undefined) {
+      const room = layout.rooms[neighbor.roomId];
+      const oppositeSide = side === 'east' ? 'west' : 'north';
+      return room?.doorway?.x === neighbor.x && room.doorway?.z === neighbor.z && room.doorway?.side === oppositeSide;
+    }
+
+    return false;
+  }
+
+  private addInteriorDoorFrame(
+    group: THREE.Group,
+    layout: InteriorLayout,
+    worldX: number,
+    worldZ: number,
+    side: 'east' | 'south',
+  ): void {
+    const halfCell = layout.cellSize * 0.5;
+    const wallHeight = INTERIOR_CEILING_CLEARANCE + 0.9;
+    const jambHeight = INTERIOR_DOOR_CLEAR_HEIGHT;
+    const jambY = layout.floorHeight + jambHeight * 0.5;
+    const lintelHeight = wallHeight - INTERIOR_DOOR_CLEAR_HEIGHT;
+    const lintelY = layout.floorHeight + INTERIOR_DOOR_CLEAR_HEIGHT + lintelHeight * 0.5;
+    const sideFillDepth = Math.max(0.2, (layout.cellSize - INTERIOR_DOOR_CLEAR_WIDTH) * 0.5);
+    const trimThickness = INTERIOR_WALL_THICKNESS + 0.1;
+    const doorThresholdY = layout.floorHeight + 0.08;
+
+    if (side === 'east') {
+      const frameX = worldX + halfCell - INTERIOR_WALL_THICKNESS * 0.5;
+      group.add(
+        this.createBox(trimThickness, wallHeight, sideFillDepth, frameX, layout.floorHeight + wallHeight * 0.5, worldZ - (INTERIOR_DOOR_CLEAR_WIDTH * 0.5 + sideFillDepth * 0.5), this.interiorWallMaterial),
+      );
+      group.add(
+        this.createBox(trimThickness, wallHeight, sideFillDepth, frameX, layout.floorHeight + wallHeight * 0.5, worldZ + (INTERIOR_DOOR_CLEAR_WIDTH * 0.5 + sideFillDepth * 0.5), this.interiorWallMaterial),
+      );
+      group.add(
+        this.createBox(trimThickness, lintelHeight, INTERIOR_DOOR_CLEAR_WIDTH, frameX, lintelY, worldZ, this.interiorWallMaterial),
+      );
+      group.add(
+        this.createBox(0.26, jambHeight, 0.34, frameX, jambY, worldZ - INTERIOR_DOOR_CLEAR_WIDTH * 0.5, this.interiorAccentMaterial),
+      );
+      group.add(
+        this.createBox(0.26, jambHeight, 0.34, frameX, jambY, worldZ + INTERIOR_DOOR_CLEAR_WIDTH * 0.5, this.interiorAccentMaterial),
+      );
+      group.add(
+        this.createBox(0.26, 0.26, INTERIOR_DOOR_CLEAR_WIDTH, frameX, layout.floorHeight + INTERIOR_DOOR_CLEAR_HEIGHT, worldZ, this.interiorAccentMaterial),
+      );
+      group.add(
+        this.createBox(0.22, 0.12, INTERIOR_DOOR_CLEAR_WIDTH - 0.28, frameX, doorThresholdY, worldZ, this.interiorAccentMaterial),
+      );
+      return;
+    }
+
+    const frameZ = worldZ + halfCell - INTERIOR_WALL_THICKNESS * 0.5;
+    group.add(
+      this.createBox(sideFillDepth, wallHeight, trimThickness, worldX - (INTERIOR_DOOR_CLEAR_WIDTH * 0.5 + sideFillDepth * 0.5), layout.floorHeight + wallHeight * 0.5, frameZ, this.interiorWallMaterial),
+    );
+    group.add(
+      this.createBox(sideFillDepth, wallHeight, trimThickness, worldX + (INTERIOR_DOOR_CLEAR_WIDTH * 0.5 + sideFillDepth * 0.5), layout.floorHeight + wallHeight * 0.5, frameZ, this.interiorWallMaterial),
+    );
+    group.add(
+      this.createBox(INTERIOR_DOOR_CLEAR_WIDTH, lintelHeight, trimThickness, worldX, lintelY, frameZ, this.interiorWallMaterial),
+    );
+    group.add(
+      this.createBox(0.34, jambHeight, 0.26, worldX - INTERIOR_DOOR_CLEAR_WIDTH * 0.5, jambY, frameZ, this.interiorAccentMaterial),
+    );
+    group.add(
+      this.createBox(0.34, jambHeight, 0.26, worldX + INTERIOR_DOOR_CLEAR_WIDTH * 0.5, jambY, frameZ, this.interiorAccentMaterial),
+    );
+    group.add(
+      this.createBox(INTERIOR_DOOR_CLEAR_WIDTH, 0.26, 0.26, worldX, layout.floorHeight + INTERIOR_DOOR_CLEAR_HEIGHT, frameZ, this.interiorAccentMaterial),
+    );
+    group.add(
+      this.createBox(INTERIOR_DOOR_CLEAR_WIDTH - 0.28, 0.12, 0.22, worldX, doorThresholdY, frameZ, this.interiorAccentMaterial),
+    );
+  }
+
+  private addInteriorProp(group: THREE.Group, prop: InteriorPropInstance): void {
+    if (prop.kind === 'stairRun') {
+      this.addInteriorStairProp(group, prop);
+      return;
+    }
+
+    group.add(
+      this.createBox(
+        prop.width,
+        prop.height,
+        prop.depth,
+        prop.x,
+        prop.y,
+        prop.z,
+        this.interiorFurnitureMaterial,
+      ),
+    );
+
+    switch (prop.kind) {
+      case 'crateStack':
+        group.add(
+          this.createBox(
+            Math.max(0.8, prop.width * 0.65),
+            0.28,
+            Math.max(0.8, prop.depth * 0.65),
+            prop.x,
+            prop.y + prop.height * 0.36,
+            prop.z,
+            this.interiorAccentMaterial,
+          ),
+        );
+        break;
+      case 'serverRack':
+        for (let stripe = -1; stripe <= 1; stripe += 1) {
+          group.add(
+            this.createBox(
+              Math.max(0.18, prop.width * 0.18),
+              prop.height * 0.74,
+              0.16,
+              prop.x,
+              prop.y,
+              prop.z + stripe * Math.min(0.7, prop.depth * 0.18),
+              this.interiorAccentMaterial,
+            ),
+          );
+        }
+        break;
+      case 'console':
+        group.add(
+          this.createBox(
+            Math.max(0.9, prop.width * 0.78),
+            0.24,
+            Math.max(0.45, prop.depth * 0.72),
+            prop.x,
+            prop.y + prop.height * 0.32,
+            prop.z,
+            this.interiorAccentMaterial,
+          ),
+        );
+        break;
+      case 'bench':
+        group.add(
+          this.createBox(
+            prop.width,
+            0.2,
+            prop.depth,
+            prop.x,
+            prop.y + prop.height * 0.12,
+            prop.z,
+            this.interiorAccentMaterial,
+          ),
+        );
+        break;
+      case 'pillar':
+        group.add(
+          this.createBox(
+            prop.width + 0.12,
+            0.2,
+            prop.depth + 0.12,
+            prop.x,
+            prop.y + prop.height * 0.5 - 0.1,
+            prop.z,
+            this.interiorAccentMaterial,
+          ),
+        );
+        break;
+    }
+  }
+
+  private addInteriorStairProp(group: THREE.Group, prop: InteriorPropInstance): void {
+    const stepCount = 6;
+    const axis = prop.orientation ?? (prop.depth > prop.width ? 'z' : 'x');
+    const stepHeight = prop.height / stepCount;
+    const totalRun = axis === 'x' ? prop.width : prop.depth;
+    const treadDepth = totalRun / stepCount;
+    const stairWidth = axis === 'x' ? prop.depth : prop.width;
+    const baseX = prop.x;
+    const baseZ = prop.z;
+
+    for (let index = 0; index < stepCount; index += 1) {
+      const height = stepHeight * (index + 1);
+
+      if (axis === 'x') {
+        const centerX = baseX - prop.width * 0.5 + treadDepth * (index + 0.5);
+        group.add(
+          this.createBox(
+            treadDepth,
+            height,
+            stairWidth,
+            centerX,
+            prop.y + height * 0.5,
+            baseZ,
+            this.interiorFurnitureMaterial,
+          ),
+        );
+      } else {
+        const centerZ = baseZ - prop.depth * 0.5 + treadDepth * (index + 0.5);
+        group.add(
+          this.createBox(
+            stairWidth,
+            height,
+            treadDepth,
+            baseX,
+            prop.y + height * 0.5,
+            centerZ,
+            this.interiorFurnitureMaterial,
+          ),
+        );
+      }
+    }
+
+    if (axis === 'x') {
+      group.add(
+        this.createBox(prop.width, 0.12, 0.18, baseX, prop.y + prop.height + 0.04, baseZ - stairWidth * 0.5 + 0.12, this.interiorAccentMaterial),
+      );
+      group.add(
+        this.createBox(prop.width, 0.12, 0.18, baseX, prop.y + prop.height + 0.04, baseZ + stairWidth * 0.5 - 0.12, this.interiorAccentMaterial),
+      );
+      return;
+    }
+
+    group.add(
+      this.createBox(0.18, 0.12, prop.depth, baseX - stairWidth * 0.5 + 0.12, prop.y + prop.height + 0.04, baseZ, this.interiorAccentMaterial),
+    );
+    group.add(
+      this.createBox(0.18, 0.12, prop.depth, baseX + stairWidth * 0.5 - 0.12, prop.y + prop.height + 0.04, baseZ, this.interiorAccentMaterial),
+    );
   }
 
   private createTerrainMesh(coord: ChunkCoord): THREE.Mesh {

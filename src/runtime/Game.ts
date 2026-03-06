@@ -378,7 +378,12 @@ export class Game {
   };
 
   private update(deltaTime: number): void {
-    this.controller.update(deltaTime, this.input, (x, z) => this.world.getHeightAt(x, z));
+    this.controller.update(
+      deltaTime,
+      this.input,
+      (x, z) => this.world.getHeightAt(x, z),
+      (x, z) => this.world.canOccupy(x, z),
+    );
     this.world.update(this.controller.position, this.frame);
     this.frame += 1;
     this.overlay.classList.toggle('is-hidden', this.input.locked);

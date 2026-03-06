@@ -28,6 +28,7 @@ export class FirstPersonController {
     deltaTime: number,
     input: InputController,
     sampleHeight: (x: number, z: number) => number,
+    canOccupy?: (x: number, z: number) => boolean,
   ): void {
     const look = input.consumeLookDelta();
     this.yaw -= look.x * this.config.mouseSensitivity;
@@ -59,7 +60,22 @@ export class FirstPersonController {
       this.move.normalize();
     }
 
-    this.position.addScaledVector(this.move, this.config.moveSpeed * deltaTime);
+    const travelDistance = this.config.moveSpeed * deltaTime;
+    const targetX = this.position.x + this.move.x * travelDistance;
+    const targetZ = this.position.z + this.move.z * travelDistance;
+
+    if (canOccupy) {
+      if (canOccupy(targetX, this.position.z)) {
+        this.position.x = targetX;
+      }
+
+      if (canOccupy(this.position.x, targetZ)) {
+        this.position.z = targetZ;
+      }
+    } else {
+      this.position.x = targetX;
+      this.position.z = targetZ;
+    }
 
     const groundHeight = sampleHeight(this.position.x, this.position.z);
     const targetY = groundHeight + this.config.eyeHeight;
