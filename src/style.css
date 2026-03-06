@@ -1,0 +1,90 @@
+:root {
+  font-family: 'SFMono-Regular', 'Cascadia Mono', 'Fira Code', monospace;
+  color: #c5ffd0;
+  background:
+    radial-gradient(circle at top, rgba(0, 70, 25, 0.25), transparent 42%),
+    linear-gradient(180deg, #021005 0%, #010402 100%);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  min-width: 320px;
+}
+
+.game-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at center, rgba(7, 36, 14, 0.55), rgba(1, 6, 2, 0.98) 70%);
+}
+
+.game-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.game-overlay {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(0, 0, 0, 0.28);
+  transition: opacity 180ms ease;
+  cursor: pointer;
+}
+
+.game-overlay.is-hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.overlay-card {
+  max-width: 420px;
+  padding: 20px 22px;
+  border: 1px solid rgba(85, 255, 140, 0.28);
+  background: rgba(0, 14, 4, 0.74);
+  box-shadow:
+    0 0 30px rgba(20, 255, 120, 0.08),
+    inset 0 0 0 1px rgba(120, 255, 160, 0.06);
+}
+
+.overlay-card h1,
+.overlay-card p {
+  margin: 0;
+}
+
+.overlay-card h1 {
+  font-size: 18px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #b9ffc1;
+}
+
+.overlay-card p {
+  margin-top: 10px;
+  line-height: 1.5;
+  color: rgba(185, 255, 193, 0.78);
+}
+
+.overlay-status {
+  color: #7eff94;
+}
