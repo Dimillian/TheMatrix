@@ -1,7 +1,8 @@
 import type { GameConfig } from './types.ts';
 
-export const GAME_CONFIG: GameConfig = {
-  seed: 1337,
+export const DEFAULT_SEED = 1337;
+
+const SHARED_CONFIG: Omit<GameConfig, 'seed'> = {
   spawnX: 32,
   spawnZ: 32,
   chunkSize: 64,
@@ -22,3 +23,16 @@ export const GAME_CONFIG: GameConfig = {
   treeCandidatesPerChunk: 30,
   spawnClearRadius: 18,
 };
+
+function randomSeed(): number {
+  return Math.floor(Math.random() * 1_000_000_000);
+}
+
+export function createGameConfig(seed = randomSeed()): GameConfig {
+  return {
+    seed,
+    ...SHARED_CONFIG,
+  };
+}
+
+export const FIXED_GAME_CONFIG = createGameConfig(DEFAULT_SEED);

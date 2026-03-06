@@ -101,6 +101,15 @@ export class GlyphRenderer {
     this.renderer.dispose();
   }
 
+  getDebugStats(): { columns: number; rows: number; renderWidth: number; renderHeight: number } {
+    return {
+      columns: this.columns,
+      rows: this.rows,
+      renderWidth: this.colorTarget.width,
+      renderHeight: this.colorTarget.height,
+    };
+  }
+
   private drawGlyphs(deltaTime: number): void {
     this.elapsedTime += deltaTime;
     this.context.fillStyle = BACKGROUND_COLOR;

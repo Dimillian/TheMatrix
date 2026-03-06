@@ -107,6 +107,13 @@ export class WorldManager {
     return sampleTerrainHeight(x, z, this.config);
   }
 
+  getDebugStats(): { activeChunks: number; queuedChunks: number } {
+    return {
+      activeChunks: this.chunks.size,
+      queuedChunks: this.generationQueue.length,
+    };
+  }
+
   dispose(): void {
     for (const chunk of this.chunks.values()) {
       this.disposeChunk(chunk);

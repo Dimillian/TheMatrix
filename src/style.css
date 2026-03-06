@@ -41,6 +41,67 @@ body {
   height: 100%;
 }
 
+.game-hud {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  z-index: 2;
+  min-width: 220px;
+  padding: 12px 14px;
+  border: 1px solid rgba(102, 255, 150, 0.24);
+  background: rgba(0, 10, 3, 0.62);
+  box-shadow:
+    0 0 22px rgba(20, 255, 120, 0.08),
+    inset 0 0 0 1px rgba(120, 255, 160, 0.04);
+  pointer-events: auto;
+}
+
+.hud-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.hud-title {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: rgba(185, 255, 193, 0.92);
+}
+
+.hud-toggle {
+  border: 1px solid rgba(100, 255, 148, 0.22);
+  background: rgba(3, 24, 8, 0.86);
+  color: #8effa4;
+  padding: 5px 8px;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.hud-summary,
+.hud-debug {
+  margin: 0;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+  color: rgba(185, 255, 193, 0.86);
+  white-space: pre-wrap;
+}
+
+.hud-debug {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(102, 255, 150, 0.14);
+  color: rgba(126, 255, 148, 0.76);
+}
+
+.hud-debug.is-hidden {
+  display: none;
+}
+
 .game-overlay {
   position: absolute;
   inset: 0;

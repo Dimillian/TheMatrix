@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { GAME_CONFIG } from '../config.ts';
+import { FIXED_GAME_CONFIG } from '../config.ts';
 import { generateTreesForChunk } from './trees.ts';
 
 describe('tree generation', () => {
   it('is deterministic for the same seed and chunk', () => {
-    const treesA = generateTreesForChunk({ x: 3, z: -2 }, GAME_CONFIG);
-    const treesB = generateTreesForChunk({ x: 3, z: -2 }, GAME_CONFIG);
+    const treesA = generateTreesForChunk({ x: 3, z: -2 }, FIXED_GAME_CONFIG);
+    const treesB = generateTreesForChunk({ x: 3, z: -2 }, FIXED_GAME_CONFIG);
 
     expect(treesA).toEqual(treesB);
   });
 
   it('varies across chunk coordinates', () => {
-    const treesA = generateTreesForChunk({ x: 0, z: 0 }, GAME_CONFIG);
-    const treesB = generateTreesForChunk({ x: 1, z: 0 }, GAME_CONFIG);
+    const treesA = generateTreesForChunk({ x: 0, z: 0 }, FIXED_GAME_CONFIG);
+    const treesB = generateTreesForChunk({ x: 1, z: 0 }, FIXED_GAME_CONFIG);
 
     expect(treesA).not.toEqual(treesB);
   });
@@ -31,12 +31,12 @@ describe('tree generation', () => {
     ];
 
     for (const coord of nearbyChunks) {
-      const trees = generateTreesForChunk(coord, GAME_CONFIG);
+      const trees = generateTreesForChunk(coord, FIXED_GAME_CONFIG);
       for (const tree of trees) {
-        const dx = tree.x - GAME_CONFIG.spawnX;
-        const dz = tree.z - GAME_CONFIG.spawnZ;
+        const dx = tree.x - FIXED_GAME_CONFIG.spawnX;
+        const dz = tree.z - FIXED_GAME_CONFIG.spawnZ;
         expect(dx * dx + dz * dz).toBeGreaterThanOrEqual(
-          GAME_CONFIG.spawnClearRadius * GAME_CONFIG.spawnClearRadius,
+          FIXED_GAME_CONFIG.spawnClearRadius * FIXED_GAME_CONFIG.spawnClearRadius,
         );
       }
     }
