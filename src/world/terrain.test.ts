@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { FIXED_GAME_CONFIG } from '../config.ts';
-import { sampleTerrainHeight } from './terrain.ts';
+import { sampleTerrain, sampleTerrainHeight } from './terrain.ts';
 
 describe('terrain continuity', () => {
   it('stays continuous across chunk borders', () => {
@@ -21,5 +21,21 @@ describe('terrain continuity', () => {
     const justAfter = sampleTerrainHeight(border + epsilon, 11.4, FIXED_GAME_CONFIG);
 
     expect(Math.abs(justBefore - justAfter)).toBeLessThan(0.02);
+  });
+
+  it('returns stable biome and climate fields for the same sample point', () => {
+    const first = sampleTerrain(87.5, -42.25, FIXED_GAME_CONFIG);
+    const second = sampleTerrain(87.5, -42.25, FIXED_GAME_CONFIG);
+
+    expect(first).toEqual(second);
+    expect(first.moisture).toBeGreaterThanOrEqual(0);
+    expect(first.moisture).toBeLessThanOrEqual(1);
+    expect(first.temperature).toBeGreaterThanOrEqual(0);
+    expect(first.temperature).toBeLessThanOrEqual(1);
+    expect(first.vegetation).toBeGreaterThanOrEqual(0);
+    expect(first.vegetation).toBeLessThanOrEqual(1);
+    expect(first.rockiness).toBeGreaterThanOrEqual(0);
+    expect(first.rockiness).toBeLessThanOrEqual(1);
+    expect(first.biome).toMatch(/wetlands|plains|forest|rocky_highlands|barren_ridge/);
   });
 });

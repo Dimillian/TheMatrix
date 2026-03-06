@@ -47,3 +47,28 @@ export function fbm2D(
 
   return normalization === 0 ? 0 : sum / normalization;
 }
+
+export function ridgedNoise2D(
+  x: number,
+  z: number,
+  seed: number,
+  octaves: number,
+  lacunarity = 2,
+  gain = 0.5,
+): number {
+  let amplitude = 0.5;
+  let frequency = 1;
+  let sum = 0;
+  let normalization = 0;
+
+  for (let octave = 0; octave < octaves; octave += 1) {
+    const base = valueNoise2D(x * frequency, z * frequency, seed + octave * 17);
+    const ridge = 1 - Math.abs(base * 2 - 1);
+    sum += ridge * ridge * amplitude;
+    normalization += amplitude;
+    amplitude *= gain;
+    frequency *= lacunarity;
+  }
+
+  return normalization === 0 ? 0 : sum / normalization;
+}

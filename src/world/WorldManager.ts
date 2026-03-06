@@ -1,8 +1,18 @@
 import * as THREE from 'three';
-import type { ChunkCoord, ChunkData, GameConfig, TreeInstanceData } from '../types.ts';
+import type { ChunkCoord, ChunkData, GameConfig, PropInstanceData, TerrainBiomeId, TerrainSample } from '../types.ts';
 import { chunkKey, chunkOrigin, enumerateChunkRing, worldToChunkCoord } from './chunks.ts';
-import { sampleTerrainHeight } from './terrain.ts';
-import { generateTreesForChunk } from './trees.ts';
+import { generatePropsForChunk } from './props.ts';
+import { sampleTerrain, sampleTerrainHeight } from './terrain.ts';
+
+const BIOME_BASE_COLORS: Record<TerrainBiomeId, [number, number, number]> = {
+  wetlands: [0.06, 0.24, 0.1],
+  plains: [0.11, 0.36, 0.12],
+  forest: [0.08, 0.3, 0.1],
+  rocky_highlands: [0.14, 0.42, 0.16],
+  barren_ridge: [0.2, 0.52, 0.22],
+};
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
 
 export class WorldManager {
   private readonly scene: THREE.Scene;
@@ -12,36 +22,68 @@ export class WorldManager {
   private readonly generationQueue: ChunkCoord[] = [];
 
   private readonly terrainMaterial = new THREE.MeshStandardMaterial({
-    color: 0x79ff93,
-    emissive: 0x0f2f16,
+    color: 0x8cff9e,
+    emissive: 0x102915,
     flatShading: false,
-    roughness: 0.92,
+    roughness: 0.9,
     metalness: 0,
     vertexColors: true,
   });
 
   private readonly terrainLineMaterial = new THREE.LineBasicMaterial({
-    color: 0x7cff97,
+    color: 0xa7ffb6,
     transparent: true,
-    opacity: 0.34,
+    opacity: 0.28,
   });
 
   private readonly trunkMaterial = new THREE.MeshStandardMaterial({
-    color: 0x4dff86,
+    color: 0x56f289,
     emissive: 0x0b2312,
     roughness: 1,
     metalness: 0,
   });
 
   private readonly canopyMaterial = new THREE.MeshStandardMaterial({
-    color: 0x9cffb0,
-    emissive: 0x12381c,
-    roughness: 0.9,
+    color: 0xb5ffc5,
+    emissive: 0x16331d,
+    roughness: 0.86,
     metalness: 0,
+  });
+
+  private readonly deadwoodMaterial = new THREE.MeshStandardMaterial({
+    color: 0x8af0a5,
+    emissive: 0x10231a,
+    roughness: 0.96,
+    metalness: 0,
+  });
+
+  private readonly shrubMaterial = new THREE.MeshStandardMaterial({
+    color: 0x79ff8f,
+    emissive: 0x112a17,
+    roughness: 0.92,
+    metalness: 0,
+  });
+
+  private readonly rockMaterial = new THREE.MeshStandardMaterial({
+    color: 0x9dffbb,
+    emissive: 0x15301e,
+    roughness: 0.95,
+    metalness: 0,
+  });
+
+  private readonly obeliskMaterial = new THREE.MeshStandardMaterial({
+    color: 0xc3ffd3,
+    emissive: 0x193926,
+    roughness: 0.74,
+    metalness: 0.06,
   });
 
   private readonly trunkGeometry = new THREE.CylinderGeometry(0.35, 0.45, 1, 6);
   private readonly canopyGeometry = new THREE.ConeGeometry(1, 1, 6);
+  private readonly deadBranchGeometry = new THREE.CylinderGeometry(0.2, 0.24, 1, 5);
+  private readonly shrubGeometry = new THREE.SphereGeometry(1, 5, 4);
+  private readonly rockGeometry = new THREE.DodecahedronGeometry(1, 0);
+  private readonly obeliskGeometry = new THREE.BoxGeometry(1, 1, 1);
 
   constructor(scene: THREE.Scene, config: GameConfig) {
     this.scene = scene;
@@ -124,9 +166,17 @@ export class WorldManager {
     this.terrainMaterial.dispose();
     this.trunkMaterial.dispose();
     this.canopyMaterial.dispose();
+    this.deadwoodMaterial.dispose();
+    this.shrubMaterial.dispose();
+    this.rockMaterial.dispose();
+    this.obeliskMaterial.dispose();
     this.terrainLineMaterial.dispose();
     this.trunkGeometry.dispose();
     this.canopyGeometry.dispose();
+    this.deadBranchGeometry.dispose();
+    this.shrubGeometry.dispose();
+    this.rockGeometry.dispose();
+    this.obeliskGeometry.dispose();
   }
 
   private buildChunk(coord: ChunkCoord, frame: number): ChunkData {
@@ -137,10 +187,10 @@ export class WorldManager {
     group.add(terrainMesh);
     group.add(this.createTerrainWireframe(terrainMesh.geometry));
 
-    const trees = generateTreesForChunk(coord, this.config);
-    const treeMeshes = this.createTreeMeshes(trees);
+    const props = generatePropsForChunk(coord, this.config);
+    const propMeshes = this.createPropMeshes(props);
 
-    for (const mesh of treeMeshes) {
+    for (const mesh of propMeshes) {
       group.add(mesh);
     }
 
@@ -151,7 +201,7 @@ export class WorldManager {
       key: chunkKey(coord),
       group,
       terrainMesh,
-      treeInstances: trees,
+      propInstances: props,
       bounds,
       lastTouchedFrame: frame,
     };
@@ -178,19 +228,13 @@ export class WorldManager {
       const localZ = positions[index + 2];
       const worldX = centerX + localX;
       const worldZ = centerZ + localZ;
-      const height = sampleTerrainHeight(worldX, worldZ, this.config);
-      positions[index + 1] = height;
+      const terrain = sampleTerrain(worldX, worldZ, this.config);
+      positions[index + 1] = terrain.height;
 
-      const normalizedHeight = THREE.MathUtils.clamp(
-        (height - (this.config.terrainBaseHeight - this.config.terrainHeight)) /
-          (this.config.terrainHeight * 2.4),
-        0,
-        1,
-      );
-      const colorIndex = index;
-      colors[colorIndex] = 0.08 + normalizedHeight * 0.22;
-      colors[colorIndex + 1] = 0.35 + normalizedHeight * 0.58;
-      colors[colorIndex + 2] = 0.12 + normalizedHeight * 0.18;
+      const [red, green, blue] = this.getTerrainColor(terrain);
+      colors[index] = red;
+      colors[index + 1] = green;
+      colors[index + 2] = blue;
     }
 
     geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
@@ -207,35 +251,175 @@ export class WorldManager {
     return new THREE.LineSegments(wireframe, this.terrainLineMaterial);
   }
 
-  private createTreeMeshes(trees: TreeInstanceData[]): THREE.Object3D[] {
-    if (trees.length === 0) {
+  private createPropMeshes(props: PropInstanceData[]): THREE.Object3D[] {
+    if (props.length === 0) {
       return [];
     }
 
-    const trunks = new THREE.InstancedMesh(this.trunkGeometry, this.trunkMaterial, trees.length);
-    const canopies = new THREE.InstancedMesh(this.canopyGeometry, this.canopyMaterial, trees.length);
+    const pines = props.filter((prop) => prop.kind === 'pine');
+    const deadTrees = props.filter((prop) => prop.kind === 'dead_tree');
+    const shrubs = props.filter((prop) => prop.kind === 'shrub');
+    const rocks = props.filter((prop) => prop.kind === 'rock');
+    const obelisks = props.filter((prop) => prop.kind === 'obelisk');
+    const meshes: THREE.Object3D[] = [];
     const matrix = new THREE.Matrix4();
     const quaternion = new THREE.Quaternion();
+    const euler = new THREE.Euler();
 
-    trees.forEach((tree, index) => {
-      matrix.compose(
-        new THREE.Vector3(tree.x, tree.y + tree.trunkHeight * 0.5, tree.z),
-        quaternion,
-        new THREE.Vector3(1, tree.trunkHeight, 1),
-      );
-      trunks.setMatrixAt(index, matrix);
+    if (pines.length > 0) {
+      const trunks = new THREE.InstancedMesh(this.trunkGeometry, this.trunkMaterial, pines.length);
+      const canopies = new THREE.InstancedMesh(this.canopyGeometry, this.canopyMaterial, pines.length);
 
-      matrix.compose(
-        new THREE.Vector3(tree.x, tree.y + tree.trunkHeight + tree.canopyHeight * 0.5, tree.z),
-        quaternion,
-        new THREE.Vector3(tree.canopyRadius, tree.canopyHeight, tree.canopyRadius),
-      );
-      canopies.setMatrixAt(index, matrix);
-    });
+      pines.forEach((prop, index) => {
+        euler.set(prop.pitch, prop.yaw, 0);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + (prop.trunkHeight ?? prop.height * 0.35) * 0.5, prop.z),
+          quaternion,
+          new THREE.Vector3(
+            prop.trunkRadius ?? Math.max(0.2, prop.width * 0.32),
+            prop.trunkHeight ?? prop.height * 0.35,
+            prop.trunkRadius ?? Math.max(0.2, prop.depth * 0.32),
+          ),
+        );
+        trunks.setMatrixAt(index, matrix);
 
-    trunks.instanceMatrix.needsUpdate = true;
-    canopies.instanceMatrix.needsUpdate = true;
-    return [trunks, canopies];
+        matrix.compose(
+          new THREE.Vector3(
+            prop.x,
+            prop.y + (prop.trunkHeight ?? prop.height * 0.35) + (prop.crownHeight ?? prop.height * 0.65) * 0.5,
+            prop.z,
+          ),
+          quaternion,
+          new THREE.Vector3(
+            prop.crownRadius ?? Math.max(0.7, prop.width * 1.6),
+            prop.crownHeight ?? prop.height * 0.65,
+            prop.crownRadius ?? Math.max(0.7, prop.depth * 1.6),
+          ),
+        );
+        canopies.setMatrixAt(index, matrix);
+      });
+
+      trunks.instanceMatrix.needsUpdate = true;
+      canopies.instanceMatrix.needsUpdate = true;
+      meshes.push(trunks, canopies);
+    }
+
+    if (deadTrees.length > 0) {
+      const trunks = new THREE.InstancedMesh(this.trunkGeometry, this.deadwoodMaterial, deadTrees.length);
+      const branches = new THREE.InstancedMesh(this.deadBranchGeometry, this.deadwoodMaterial, deadTrees.length);
+
+      deadTrees.forEach((prop, index) => {
+        euler.set(prop.pitch, prop.yaw, 0);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + prop.height * 0.5, prop.z),
+          quaternion,
+          new THREE.Vector3(
+            prop.trunkRadius ?? Math.max(0.18, prop.width * 0.45),
+            prop.height,
+            prop.trunkRadius ?? Math.max(0.18, prop.depth * 0.45),
+          ),
+        );
+        trunks.setMatrixAt(index, matrix);
+
+        euler.set(0.9 + prop.pitch, prop.yaw + 0.45, 0.3);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + prop.height * 0.7, prop.z),
+          quaternion,
+          new THREE.Vector3(
+            Math.max(0.12, prop.width * 0.28),
+            prop.height * 0.42,
+            Math.max(0.12, prop.depth * 0.22),
+          ),
+        );
+        branches.setMatrixAt(index, matrix);
+      });
+
+      trunks.instanceMatrix.needsUpdate = true;
+      branches.instanceMatrix.needsUpdate = true;
+      meshes.push(trunks, branches);
+    }
+
+    if (shrubs.length > 0) {
+      const shrubMesh = new THREE.InstancedMesh(this.shrubGeometry, this.shrubMaterial, shrubs.length);
+
+      shrubs.forEach((prop, index) => {
+        euler.set(prop.pitch, prop.yaw, 0);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + prop.height * 0.5, prop.z),
+          quaternion,
+          new THREE.Vector3(prop.width, prop.height, prop.depth),
+        );
+        shrubMesh.setMatrixAt(index, matrix);
+      });
+
+      shrubMesh.instanceMatrix.needsUpdate = true;
+      meshes.push(shrubMesh);
+    }
+
+    if (rocks.length > 0) {
+      const rockMesh = new THREE.InstancedMesh(this.rockGeometry, this.rockMaterial, rocks.length);
+
+      rocks.forEach((prop, index) => {
+        euler.set(prop.pitch, prop.yaw, prop.pitch * 0.65);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + prop.height * 0.5, prop.z),
+          quaternion,
+          new THREE.Vector3(prop.width, prop.height, prop.depth),
+        );
+        rockMesh.setMatrixAt(index, matrix);
+      });
+
+      rockMesh.instanceMatrix.needsUpdate = true;
+      meshes.push(rockMesh);
+    }
+
+    if (obelisks.length > 0) {
+      const obeliskMesh = new THREE.InstancedMesh(this.obeliskGeometry, this.obeliskMaterial, obelisks.length);
+
+      obelisks.forEach((prop, index) => {
+        euler.set(prop.pitch, prop.yaw, 0);
+        quaternion.setFromEuler(euler);
+        matrix.compose(
+          new THREE.Vector3(prop.x, prop.y + prop.height * 0.5, prop.z),
+          quaternion,
+          new THREE.Vector3(prop.width, prop.height, prop.depth),
+        );
+        obeliskMesh.setMatrixAt(index, matrix);
+      });
+
+      obeliskMesh.instanceMatrix.needsUpdate = true;
+      meshes.push(obeliskMesh);
+    }
+
+    return meshes;
+  }
+
+  private getTerrainColor(terrain: TerrainSample): [number, number, number] {
+    const base = BIOME_BASE_COLORS[terrain.biome];
+    const exposure = clamp01(terrain.elevation * 0.42 + terrain.ridge * 0.28 + terrain.rockiness * 0.24);
+    const dampening = terrain.moisture * 0.12;
+    const edgeLift = clamp01(terrain.rockiness * 0.26 + terrain.slope * 0.08);
+    const red = clamp01(base[0] + exposure * 0.12 + edgeLift * 0.12 - dampening * 0.3);
+    const green = clamp01(base[1] + exposure * 0.25 + terrain.vegetation * 0.16 - dampening * 0.12);
+    const blue = clamp01(base[2] + exposure * 0.1 + terrain.moisture * 0.03 + edgeLift * 0.08);
+
+    return [red, green, blue];
+  }
+
+  private isSharedGeometry(geometry: THREE.BufferGeometry): boolean {
+    return (
+      geometry === this.trunkGeometry ||
+      geometry === this.canopyGeometry ||
+      geometry === this.deadBranchGeometry ||
+      geometry === this.shrubGeometry ||
+      geometry === this.rockGeometry ||
+      geometry === this.obeliskGeometry
+    );
   }
 
   private disposeChunk(chunk: ChunkData): void {
@@ -248,7 +432,7 @@ export class WorldManager {
         return;
       }
 
-      if (renderObject.geometry === this.trunkGeometry || renderObject.geometry === this.canopyGeometry) {
+      if (this.isSharedGeometry(renderObject.geometry)) {
         return;
       }
 

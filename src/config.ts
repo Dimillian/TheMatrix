@@ -23,7 +23,7 @@ const SHARED_CONFIG: Omit<GameConfig, 'seed'> = {
   terrainContrast: 1,
   fixedTimeStep: 1 / 60,
   maxChunkBuildsPerFrame: 2,
-  treeCandidatesPerChunk: 30,
+  propCandidatesPerChunk: 52,
   spawnClearRadius: 18,
 };
 

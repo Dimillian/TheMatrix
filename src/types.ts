@@ -22,7 +22,7 @@ export interface GameConfig {
   terrainContrast: number;
   fixedTimeStep: number;
   maxChunkBuildsPerFrame: number;
-  treeCandidatesPerChunk: number;
+  propCandidatesPerChunk: number;
   spawnClearRadius: number;
 }
 
@@ -31,20 +31,42 @@ export interface ChunkCoord {
   z: number;
 }
 
+export type TerrainBiomeId =
+  | 'wetlands'
+  | 'plains'
+  | 'forest'
+  | 'rocky_highlands'
+  | 'barren_ridge';
+
 export interface TerrainSample {
   height: number;
   slope: number;
-  density: number;
+  elevation: number;
   moisture: number;
+  temperature: number;
+  erosion: number;
+  ridge: number;
+  vegetation: number;
+  rockiness: number;
+  biome: TerrainBiomeId;
 }
 
-export interface TreeInstanceData {
+export type PropKind = 'pine' | 'dead_tree' | 'shrub' | 'rock' | 'obelisk';
+
+export interface PropInstanceData {
+  kind: PropKind;
   x: number;
   y: number;
   z: number;
-  trunkHeight: number;
-  canopyHeight: number;
-  canopyRadius: number;
+  yaw: number;
+  pitch: number;
+  width: number;
+  height: number;
+  depth: number;
+  trunkHeight?: number;
+  trunkRadius?: number;
+  crownHeight?: number;
+  crownRadius?: number;
 }
 
 export interface ChunkData {
@@ -52,7 +74,7 @@ export interface ChunkData {
   key: string;
   group: THREE.Group;
   terrainMesh: THREE.Mesh;
-  treeInstances: TreeInstanceData[];
+  propInstances: PropInstanceData[];
   bounds: THREE.Box3;
   lastTouchedFrame: number;
 }
