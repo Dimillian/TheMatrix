@@ -1,5 +1,10 @@
 import * as THREE from 'three';
-import type { GameConfig } from '../types.ts';
+import {
+  GLYPH_RENDER_MODE_LABELS,
+  GLYPH_RENDER_MODES,
+  type GameConfig,
+  type GlyphRenderMode,
+} from '../types.ts';
 import { createGameConfig } from '../config.ts';
 import { GlyphRenderer } from '../render/GlyphRenderer.ts';
 import { worldToChunkCoord } from '../world/chunks.ts';
@@ -14,6 +19,7 @@ export class Game {
   private readonly hudSummary: HTMLPreElement;
   private readonly hudDebug: HTMLPreElement;
   private readonly hudToggle: HTMLButtonElement;
+  private readonly renderModeToggle: HTMLButtonElement;
   private readonly settingsPanel: HTMLDivElement;
   private readonly settingsToggle: HTMLButtonElement;
   private readonly glyphDensityInput: HTMLInputElement;
@@ -54,6 +60,7 @@ export class Game {
             <span class="hud-title">Matrix HUD</span>
             <div class="hud-actions">
               <button class="hud-toggle" type="button" aria-pressed="false">P Debug: Off</button>
+              <button class="render-mode-toggle" type="button">R Render: Classic</button>
               <button class="settings-toggle" type="button" aria-pressed="false">O Settings: Off</button>
             </div>
           </div>
@@ -95,7 +102,7 @@ export class Game {
           <div class="overlay-card">
             <h1>The Matrix</h1>
             <p>Click to enter the stream. Use WASD to move and the mouse to look around. Press Esc to release the pointer.</p>
-            <p>Press P for debug info and O for runtime settings.</p>
+            <p>Press P for debug info, R to switch render mode, and O for runtime settings.</p>
             <p class="overlay-status">Click anywhere on this panel to start.</p>
           </div>
         </div>
@@ -108,6 +115,7 @@ export class Game {
     const hudSummary = root.querySelector<HTMLPreElement>('.hud-summary');
     const hudDebug = root.querySelector<HTMLPreElement>('.hud-debug');
     const hudToggle = root.querySelector<HTMLButtonElement>('.hud-toggle');
+    const renderModeToggle = root.querySelector<HTMLButtonElement>('.render-mode-toggle');
     const settingsPanel = root.querySelector<HTMLDivElement>('.game-settings');
     const settingsToggle = root.querySelector<HTMLButtonElement>('.settings-toggle');
     const glyphDensityInput = root.querySelector<HTMLInputElement>('[data-setting="glyphDensity"]');
@@ -130,6 +138,7 @@ export class Game {
       !hudSummary ||
       !hudDebug ||
       !hudToggle ||
+      !renderModeToggle ||
       !settingsPanel ||
       !settingsToggle ||
       !glyphDensityInput ||
@@ -152,6 +161,7 @@ export class Game {
     this.hudSummary = hudSummary;
     this.hudDebug = hudDebug;
     this.hudToggle = hudToggle;
+    this.renderModeToggle = renderModeToggle;
     this.settingsPanel = settingsPanel;
     this.settingsToggle = settingsToggle;
     this.glyphDensityInput = glyphDensityInput;
@@ -172,6 +182,7 @@ export class Game {
     this.overlay.addEventListener('click', this.handleStartClick);
     this.shell.addEventListener('click', this.handleStartClick);
     this.hudToggle.addEventListener('click', this.handleHudToggle);
+    this.renderModeToggle.addEventListener('click', this.handleRenderModeToggle);
     this.settingsToggle.addEventListener('click', this.handleSettingsToggle);
     hud.addEventListener('click', this.stopShellClickPropagation);
     hud.addEventListener('pointerdown', this.stopShellClickPropagation);
@@ -223,6 +234,7 @@ export class Game {
     this.overlay.removeEventListener('click', this.handleStartClick);
     this.shell.removeEventListener('click', this.handleStartClick);
     this.hudToggle.removeEventListener('click', this.handleHudToggle);
+    this.renderModeToggle.removeEventListener('click', this.handleRenderModeToggle);
     this.settingsToggle.removeEventListener('click', this.handleSettingsToggle);
     this.glyphDensityInput.removeEventListener('input', this.handleGlyphDensityInput);
     this.animationSpeedInput.removeEventListener('input', this.handleAnimationSpeedInput);
@@ -250,6 +262,10 @@ export class Game {
     this.syncSettingsVisibility();
   };
 
+  private readonly handleRenderModeToggle = (): void => {
+    this.applyRenderMode(this.getNextRenderMode());
+  };
+
   private readonly handleKeyDown = (event: KeyboardEvent): void => {
     if (event.code === 'KeyP') {
       event.preventDefault();
@@ -263,6 +279,12 @@ export class Game {
       event.preventDefault();
       this.settingsVisible = !this.settingsVisible;
       this.syncSettingsVisibility();
+      return;
+    }
+
+    if (event.code === 'KeyR') {
+      event.preventDefault();
+      this.applyRenderMode(this.getNextRenderMode());
     }
   };
 
@@ -361,12 +383,15 @@ export class Game {
     const chunk = worldToChunkCoord(position.x, position.z, this.config.chunkSize);
     const worldStats = this.world.getDebugStats();
     const renderStats = this.glyphRenderer.getDebugStats();
+    const renderModeLabel = this.glyphRenderer.getRenderModeLabel();
 
     this.hudSummary.textContent = [
       `XYZ   ${position.x.toFixed(1)}, ${position.y.toFixed(1)}, ${position.z.toFixed(1)}`,
       `FPS   ${this.fps.toFixed(0)}`,
       `Seed  ${this.config.seed}`,
+      `Mode  ${renderModeLabel}`,
       `P     ${this.debugHudVisible ? 'hide debug' : 'show debug'}`,
+      `R     next render mode`,
       `O     ${this.settingsVisible ? 'hide settings' : 'show settings'}`,
     ].join('\n');
 
@@ -387,6 +412,11 @@ export class Game {
     this.hudDebug.classList.toggle('is-hidden', !this.debugHudVisible);
   }
 
+  private syncRenderModeControls(): void {
+    const renderModeLabel = GLYPH_RENDER_MODE_LABELS[this.config.renderMode];
+    this.renderModeToggle.textContent = `R Render: ${renderModeLabel}`;
+  }
+
   private syncSettingsVisibility(): void {
     this.settingsToggle.textContent = this.settingsVisible ? 'O Settings: On' : 'O Settings: Off';
     this.settingsToggle.setAttribute('aria-pressed', String(this.settingsVisible));
@@ -401,6 +431,7 @@ export class Game {
     this.terrainContrastInput.value = this.config.terrainContrast.toFixed(2);
     this.updateSettingsPanelValues();
     this.syncSettingsVisibility();
+    this.syncRenderModeControls();
   }
 
   private updateSettingsPanelValues(): void {
@@ -423,5 +454,17 @@ export class Game {
     const fogFar = this.config.chunkSize * (this.config.activeRadius + 1.1);
     const fogNear = Math.max(16, fogFar * 0.22);
     this.scene.fog = new THREE.Fog(0x020805, fogNear, fogFar);
+  }
+
+  private applyRenderMode(mode: GlyphRenderMode): void {
+    this.glyphRenderer.setRenderMode(mode);
+    this.syncRenderModeControls();
+    this.updateHud(0);
+  }
+
+  private getNextRenderMode(): GlyphRenderMode {
+    const currentIndex = GLYPH_RENDER_MODES.indexOf(this.config.renderMode);
+    const nextIndex = (currentIndex + 1) % GLYPH_RENDER_MODES.length;
+    return GLYPH_RENDER_MODES[nextIndex] ?? GLYPH_RENDER_MODES[0];
   }
 }

@@ -1,9 +1,29 @@
 import * as THREE from 'three';
-import type { GameConfig } from '../types.ts';
+import { GLYPH_RENDER_MODE_LABELS, type GameConfig, type GlyphRenderMode } from '../types.ts';
 
 const BACKGROUND_COLOR = 'rgba(0, 4, 1, 1)';
 const GLYPH_RAMP = [' ', '.', ':', '-', '=', '+', '*', '1', '0'];
 const MATRIX_CHARS = ['0', '1', '+', '-', '=', ':', '|', '*'];
+
+interface GlyphSample {
+  column: number;
+  row: number;
+  brightness: number;
+  depth: number;
+  localAverage: number;
+  edge: number;
+  inverseDepth: number;
+  worldSignal: number;
+  sceneFocus: number;
+  sceneMask: number;
+  turbulence: number;
+}
+
+interface GlyphPaint {
+  glyph: string;
+  green: number;
+  alpha: number;
+}
 
 export class GlyphRenderer {
   private readonly canvas: HTMLCanvasElement;
@@ -15,6 +35,11 @@ export class GlyphRenderer {
   private depthTarget: THREE.WebGLRenderTarget;
   private colorPixels = new Uint8Array(0);
   private depthPixels = new Uint8Array(0);
+  private rainColumnSpeeds = new Float32Array(0);
+  private rainColumnLengths = new Float32Array(0);
+  private rainColumnOffsets = new Float32Array(0);
+  private rainColumnGaps = new Float32Array(0);
+  private rainPersistence = new Float32Array(0);
   private columns = 0;
   private rows = 0;
   private width = 0;
@@ -48,6 +73,7 @@ export class GlyphRenderer {
     });
 
     this.resize(window.innerWidth, window.innerHeight);
+    this.resetModeState();
   }
 
   resize(width: number, height: number): void {
@@ -68,6 +94,7 @@ export class GlyphRenderer {
     this.depthPixels = new Uint8Array(targetWidth * targetHeight * 4);
 
     this.context.font = `${this.config.glyphCellHeight - 2}px "SFMono-Regular", "Cascadia Mono", monospace`;
+    this.resetModeState();
   }
 
   render(scene: THREE.Scene, camera: THREE.PerspectiveCamera, deltaTime: number): void {
@@ -101,6 +128,23 @@ export class GlyphRenderer {
     this.renderer.dispose();
   }
 
+  getRenderMode(): GlyphRenderMode {
+    return this.config.renderMode;
+  }
+
+  getRenderModeLabel(): string {
+    return GLYPH_RENDER_MODE_LABELS[this.config.renderMode];
+  }
+
+  setRenderMode(mode: GlyphRenderMode): void {
+    if (this.config.renderMode === mode) {
+      return;
+    }
+
+    this.config.renderMode = mode;
+    this.resetModeState();
+  }
+
   getDebugStats(): { columns: number; rows: number; renderWidth: number; renderHeight: number } {
     return {
       columns: this.columns,
@@ -120,77 +164,193 @@ export class GlyphRenderer {
 
     for (let row = 0; row < this.rows; row += 1) {
       for (let column = 0; column < this.columns; column += 1) {
-        const sampleX = Math.min(sourceWidth - 1, Math.floor((column / this.columns) * sourceWidth));
-        const sampleY = Math.min(sourceHeight - 1, Math.floor((row / this.rows) * sourceHeight));
-        const pixelIndex = this.getPixelIndex(sampleX, sampleY, sourceWidth, sourceHeight);
+        const sample = this.createGlyphSample(column, row, sourceWidth, sourceHeight);
 
-        const brightness = this.readBrightness(pixelIndex);
-        const depth = this.readDepth(pixelIndex);
-        const localAverage = this.computeNeighborhoodBrightness(sampleX, sampleY, sourceWidth, sourceHeight);
-        const edge = this.computeEdge(sampleX, sampleY, sourceWidth, sourceHeight);
-        const inverseDepth = 1 - depth;
-        const rawWorldSignal = Math.max(
-          0,
-          brightness * 0.55 +
-            localAverage * 0.4 +
-            inverseDepth * 0.24 +
-            edge * 0.8 -
-            0.14,
-        );
-
-        const worldSignal = THREE.MathUtils.clamp(
-          (rawWorldSignal - 0.05) * (0.85 + this.config.terrainContrast * 0.95) + 0.05,
-          0,
-          1,
-        );
-
-        if (worldSignal < 0.055) {
+        if (!sample) {
           continue;
         }
 
-        const sceneFocus = THREE.MathUtils.clamp(
-          brightness * 0.25 + localAverage * 0.35 + edge * 0.95 + inverseDepth * 0.15,
-          0,
-          1,
-        );
-        const sceneMask =
-          THREE.MathUtils.smoothstep(worldSignal, 0.08, 0.2) *
-          THREE.MathUtils.smoothstep(sceneFocus, 0.12, 0.34);
-        const turbulence = this.computeTurbulence(column, row, depth);
-        const streamEnergy =
-          this.computePatternEnergy(column, row, inverseDepth, turbulence) *
-          sceneMask *
-          (0.45 + sceneFocus * 0.9) *
-          (0.75 + turbulence * 0.5);
+        const paint =
+          this.config.renderMode === 'rain'
+            ? this.paintRainGlyph(sample, deltaTime)
+            : this.paintClassicGlyph(sample);
 
-        const shimmer =
-          0.9 + 0.1 * Math.sin(this.elapsedTime * 1.7 + column * 0.22 + row * 0.17 + depth * 3.4);
-        const visibility = Math.min(
-          1,
-          (worldSignal * (0.84 + sceneFocus * 0.3) + streamEnergy * 0.62) * shimmer,
-        );
-        const glyph = this.pickGlyph(
-          column,
-          row,
-          visibility,
-          edge,
-          inverseDepth,
-          localAverage,
-          streamEnergy,
-          turbulence,
-        );
-        const green = Math.floor(
-          94 + visibility * 118 + edge * 42 + sceneFocus * 28 + streamEnergy * 92,
-        );
-        const alpha = Math.min(1, 0.16 + visibility * 0.74 + streamEnergy * 0.4);
-        this.context.fillStyle = `rgba(90, ${green}, 100, ${alpha})`;
+        if (!paint) {
+          continue;
+        }
+
+        this.context.fillStyle = `rgba(90, ${paint.green}, 100, ${paint.alpha})`;
         this.context.fillText(
-          glyph,
+          paint.glyph,
           column * this.config.glyphCellWidth,
           row * this.config.glyphCellHeight,
         );
       }
     }
+  }
+
+  private createGlyphSample(
+    column: number,
+    row: number,
+    sourceWidth: number,
+    sourceHeight: number,
+  ): GlyphSample | null {
+    const sampleX = Math.min(sourceWidth - 1, Math.floor((column / this.columns) * sourceWidth));
+    const sampleY = Math.min(sourceHeight - 1, Math.floor((row / this.rows) * sourceHeight));
+    const pixelIndex = this.getPixelIndex(sampleX, sampleY, sourceWidth, sourceHeight);
+
+    const brightness = this.readBrightness(pixelIndex);
+    const depth = this.readDepth(pixelIndex);
+    const localAverage = this.computeNeighborhoodBrightness(sampleX, sampleY, sourceWidth, sourceHeight);
+    const edge = this.computeEdge(sampleX, sampleY, sourceWidth, sourceHeight);
+    const inverseDepth = 1 - depth;
+    const rawWorldSignal = Math.max(
+      0,
+      brightness * 0.55 +
+        localAverage * 0.4 +
+        inverseDepth * 0.24 +
+        edge * 0.8 -
+        0.14,
+    );
+
+    const worldSignal = THREE.MathUtils.clamp(
+      (rawWorldSignal - 0.05) * (0.85 + this.config.terrainContrast * 0.95) + 0.05,
+      0,
+      1,
+    );
+
+    if (worldSignal < 0.055) {
+      return null;
+    }
+
+    const sceneFocus = THREE.MathUtils.clamp(
+      brightness * 0.25 + localAverage * 0.35 + edge * 0.95 + inverseDepth * 0.15,
+      0,
+      1,
+    );
+    const sceneMask =
+      THREE.MathUtils.smoothstep(worldSignal, 0.08, 0.2) *
+      THREE.MathUtils.smoothstep(sceneFocus, 0.12, 0.34);
+
+    return {
+      column,
+      row,
+      brightness,
+      depth,
+      localAverage,
+      edge,
+      inverseDepth,
+      worldSignal,
+      sceneFocus,
+      sceneMask,
+      turbulence: this.computeTurbulence(column, row, depth),
+    };
+  }
+
+  private paintClassicGlyph(sample: GlyphSample): GlyphPaint {
+    const streamEnergy =
+      this.computeClassicPatternEnergy(
+        sample.column,
+        sample.row,
+        sample.inverseDepth,
+        sample.turbulence,
+      ) *
+      sample.sceneMask *
+      (0.45 + sample.sceneFocus * 0.9) *
+      (0.75 + sample.turbulence * 0.5);
+
+    const shimmer =
+      0.9 +
+      0.1 *
+        Math.sin(
+          this.elapsedTime * 1.7 +
+            sample.column * 0.22 +
+            sample.row * 0.17 +
+            sample.depth * 3.4,
+        );
+    const visibility = Math.min(
+      1,
+      (sample.worldSignal * (0.84 + sample.sceneFocus * 0.3) + streamEnergy * 0.62) * shimmer,
+    );
+
+    return {
+      glyph: this.pickGlyph(
+        sample.column,
+        sample.row,
+        visibility,
+        sample.edge,
+        sample.inverseDepth,
+        sample.localAverage,
+        streamEnergy,
+        sample.turbulence,
+      ),
+      green: Math.floor(
+        94 +
+          visibility * 118 +
+          sample.edge * 42 +
+          sample.sceneFocus * 28 +
+          streamEnergy * 92,
+      ),
+      alpha: Math.min(1, 0.16 + visibility * 0.74 + streamEnergy * 0.4),
+    };
+  }
+
+  private paintRainGlyph(sample: GlyphSample, deltaTime: number): GlyphPaint {
+    const rainMask = this.computeRainMask(
+      sample.column,
+      sample.row,
+      sample.inverseDepth,
+      sample.turbulence,
+    );
+    const persistenceIndex = sample.row * this.columns + sample.column;
+    const storedMask = this.integrateRainMask(
+      persistenceIndex,
+      deltaTime,
+      rainMask * sample.sceneMask,
+      sample.sceneFocus,
+    );
+    const streamEnergy = Math.min(
+      1,
+      (rainMask * 0.72 + storedMask * 0.92) *
+        sample.sceneMask *
+        (0.5 + sample.sceneFocus * 0.78) *
+        (0.78 + sample.turbulence * 0.35),
+    );
+
+    const shimmer =
+      0.9 +
+      0.1 *
+        Math.sin(
+          this.elapsedTime * 1.7 +
+            sample.column * 0.22 +
+            sample.row * 0.17 +
+            sample.depth * 3.4,
+        );
+    const revealedWorld = Math.max(rainMask * sample.sceneMask, storedMask * sample.sceneMask * 0.92);
+    const terrainPresence = revealedWorld * (0.3 + sample.edge * 0.9 + sample.sceneFocus * 0.28);
+    const visibility = Math.min(
+      1,
+      (sample.worldSignal * 0.04 + terrainPresence * 0.62 + streamEnergy * 0.74) * shimmer,
+    );
+
+    return {
+      glyph: this.pickRainGlyph(sample, visibility, streamEnergy),
+      green: Math.floor(
+        80 +
+          visibility * 104 +
+          sample.edge * 56 +
+          sample.sceneFocus * 20 +
+          streamEnergy * 118,
+      ),
+      alpha: Math.min(
+        1,
+        0.05 +
+          terrainPresence * 0.24 +
+          visibility * 0.34 +
+          sample.edge * 0.18 +
+          streamEnergy * 0.58,
+      ),
+    };
   }
 
   private pickGlyph(
@@ -229,7 +389,127 @@ export class GlyphRenderer {
     return GLYPH_RAMP[rampIndex];
   }
 
-  private computePatternEnergy(
+  private pickRainGlyph(sample: GlyphSample, visibility: number, streamEnergy: number): string {
+    const rampIndex = Math.min(
+      GLYPH_RAMP.length - 1,
+      Math.floor(
+        (
+          visibility * 0.48 +
+          sample.edge * 0.52 +
+          sample.inverseDepth * 0.12 +
+          sample.localAverage * 0.2 +
+          streamEnergy * 0.5
+        ) *
+          GLYPH_RAMP.length,
+      ),
+    );
+
+    if (streamEnergy > 0.06 || visibility > 0.58) {
+      const columnSpeed = this.rainColumnSpeeds[sample.column] ?? 12;
+      const phase = Math.floor(
+        this.elapsedTime * (columnSpeed * 1.4 + streamEnergy * 18) -
+          sample.row * (0.8 + streamEnergy * 1.6),
+      );
+      const randomIndex = Math.floor(
+        this.hash(
+          sample.column * 13 + phase,
+          sample.row * 17 + Math.floor(sample.turbulence * 97),
+          sample.inverseDepth * 37.1,
+        ) * MATRIX_CHARS.length,
+      );
+      return MATRIX_CHARS[randomIndex] ?? '0';
+    }
+
+    return GLYPH_RAMP[rampIndex];
+  }
+
+  private resetModeState(): void {
+    if (this.config.renderMode === 'rain') {
+      this.initializeRainField();
+      return;
+    }
+
+    this.rainPersistence = new Float32Array(0);
+  }
+
+  private initializeRainField(): void {
+    this.rainColumnSpeeds = new Float32Array(this.columns);
+    this.rainColumnLengths = new Float32Array(this.columns);
+    this.rainColumnOffsets = new Float32Array(this.columns);
+    this.rainColumnGaps = new Float32Array(this.columns);
+    this.rainPersistence = new Float32Array(this.columns * this.rows);
+
+    for (let column = 0; column < this.columns; column += 1) {
+      const speedSeed = this.hash(column * 0.91, this.config.seed * 0.0007, 1.1);
+      const lengthSeed = this.hash(column * 1.73, this.config.seed * 0.0013, 2.7);
+      const gapSeed = this.hash(column * 2.41, this.config.seed * 0.0021, 4.3);
+      const cycleLength = this.rows + (14 + lengthSeed * 28) + (1 + gapSeed * 8);
+
+      this.rainColumnSpeeds[column] = 20 + speedSeed * 24;
+      this.rainColumnLengths[column] = 14 + lengthSeed * 28;
+      this.rainColumnGaps[column] = 1 + gapSeed * 8;
+      this.rainColumnOffsets[column] =
+        this.hash(column * 3.17, this.config.seed * 0.0037, 5.9) * cycleLength;
+    }
+  }
+
+  private integrateRainMask(
+    index: number,
+    deltaTime: number,
+    incomingMask: number,
+    sceneFocus: number,
+  ): number {
+    const decayRate = 0.72 - sceneFocus * 0.18;
+    const retained = Math.max(0, this.rainPersistence[index] - deltaTime * decayRate);
+    const stored = Math.max(retained, incomingMask);
+    this.rainPersistence[index] = stored;
+    return stored;
+  }
+
+  private computeRainMask(
+    column: number,
+    row: number,
+    inverseDepth: number,
+    turbulence: number,
+  ): number {
+    const baseSpeed = this.rainColumnSpeeds[column] ?? 12;
+    const baseLength = this.rainColumnLengths[column] ?? 12;
+    const baseGap = this.rainColumnGaps[column] ?? 10;
+    const baseOffset = this.rainColumnOffsets[column] ?? 0;
+    let mask = 0;
+
+    for (let layer = 0; layer < 3; layer += 1) {
+      const layerPhaseSeed = this.hash(column * (2.3 + layer), this.config.seed * 0.0011, 7.1 + layer);
+      const speed = baseSpeed * (1 + layer * 0.16);
+      const length = baseLength * (0.72 + layer * 0.26);
+      const gap = Math.max(0.8, baseGap * (0.42 + layer * 0.2));
+      const cycleLength = this.rows + length + gap;
+      const headY =
+        ((this.elapsedTime * speed) + baseOffset + layerPhaseSeed * cycleLength) % cycleLength - length;
+      const headDistance = headY - row;
+
+      if (headDistance < 0 || headDistance > length) {
+        continue;
+      }
+
+      const trail = 1 - headDistance / Math.max(1, length);
+      const headGlow = Math.max(0, 1 - headDistance / 1.15);
+      const neighborGlow = Math.max(0, 1 - Math.abs(row - headY) / Math.max(3.2, length * 0.28)) * 0.34;
+      const flicker =
+        0.9 +
+        this.hash(
+          column * (2.17 + layer * 0.37) + Math.floor(this.elapsedTime * (15 + turbulence * 10)),
+          row * (0.41 + layer * 0.07),
+          inverseDepth * (17.3 + layer * 2.4),
+        ) *
+          0.22;
+      mask += trail * trail * flicker + headGlow * 1.05 + neighborGlow;
+    }
+
+    return Math.min(1, mask);
+  }
+
+  private computeClassicPatternEnergy(
     column: number,
     row: number,
     inverseDepth: number,
@@ -251,11 +531,13 @@ export class GlyphRenderer {
         ((phase * (1.4 + layer * 0.4)) + this.hash(packetSeed, 8.1, 5.4) * this.rows) % this.rows;
       const length = 3 + this.hash(packetSeed, 11.4, 9.8) * (6 + layer * 4);
       const spread = Math.max(0, 1 - Math.abs(column - centerX) / width);
+
       if (spread <= 0) {
         continue;
       }
 
       const distance = (row - headY + this.rows) % this.rows;
+
       if (distance > length) {
         continue;
       }
@@ -269,6 +551,7 @@ export class GlyphRenderer {
       row * 1.2 + Math.floor(this.elapsedTime * 36),
       inverseDepth * 13.1,
     );
+
     if (freckles > 0.82) {
       energy += (freckles - 0.82) * 1.6;
     }

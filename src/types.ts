@@ -1,5 +1,14 @@
 import type * as THREE from 'three';
 
+export const GLYPH_RENDER_MODES = ['classic', 'rain'] as const;
+
+export type GlyphRenderMode = (typeof GLYPH_RENDER_MODES)[number];
+
+export const GLYPH_RENDER_MODE_LABELS: Record<GlyphRenderMode, string> = {
+  classic: 'Classic',
+  rain: 'Rain Mask',
+};
+
 export interface GameConfig {
   seed: number;
   spawnX: number;
@@ -20,6 +29,7 @@ export interface GameConfig {
   terrainBaseHeight: number;
   terrainHeight: number;
   terrainContrast: number;
+  renderMode: GlyphRenderMode;
   fixedTimeStep: number;
   maxChunkBuildsPerFrame: number;
   treeCandidatesPerChunk: number;
