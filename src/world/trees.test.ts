@@ -16,4 +16,29 @@ describe('tree generation', () => {
 
     expect(treesA).not.toEqual(treesB);
   });
+
+  it('keeps the spawn area clear', () => {
+    const nearbyChunks = [
+      { x: 0, z: 0 },
+      { x: 1, z: 0 },
+      { x: 0, z: 1 },
+      { x: 1, z: 1 },
+      { x: 0, z: -1 },
+      { x: 1, z: -1 },
+      { x: -1, z: 0 },
+      { x: -1, z: 1 },
+      { x: -1, z: -1 },
+    ];
+
+    for (const coord of nearbyChunks) {
+      const trees = generateTreesForChunk(coord, GAME_CONFIG);
+      for (const tree of trees) {
+        const dx = tree.x - GAME_CONFIG.spawnX;
+        const dz = tree.z - GAME_CONFIG.spawnZ;
+        expect(dx * dx + dz * dz).toBeGreaterThanOrEqual(
+          GAME_CONFIG.spawnClearRadius * GAME_CONFIG.spawnClearRadius,
+        );
+      }
+    }
+  });
 });

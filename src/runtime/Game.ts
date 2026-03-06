@@ -65,7 +65,11 @@ export class Game {
     directional.position.set(-18, 30, 10);
     this.scene.add(hemi, ambient, directional);
 
-    this.controller.setSpawn(this.world.getHeightAt(0, 0));
+    this.controller.setSpawn(
+      GAME_CONFIG.spawnX,
+      GAME_CONFIG.spawnZ,
+      this.world.getHeightAt(GAME_CONFIG.spawnX, GAME_CONFIG.spawnZ),
+    );
 
     window.addEventListener('resize', this.handleResize);
     document.addEventListener('visibilitychange', this.handleVisibilityChange);

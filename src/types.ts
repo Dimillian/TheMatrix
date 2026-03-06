@@ -2,6 +2,8 @@ import type * as THREE from 'three';
 
 export interface GameConfig {
   seed: number;
+  spawnX: number;
+  spawnZ: number;
   chunkSize: number;
   terrainResolution: number;
   activeRadius: number;
@@ -18,6 +20,7 @@ export interface GameConfig {
   fixedTimeStep: number;
   maxChunkBuildsPerFrame: number;
   treeCandidatesPerChunk: number;
+  spawnClearRadius: number;
 }
 
 export interface ChunkCoord {

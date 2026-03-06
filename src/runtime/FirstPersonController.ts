@@ -20,8 +20,8 @@ export class FirstPersonController {
     this.config = config;
   }
 
-  setSpawn(height: number): void {
-    this.position.set(0, height + this.config.eyeHeight, 0);
+  setSpawn(x: number, z: number, height: number): void {
+    this.position.set(x, height + this.config.eyeHeight, z);
   }
 
   update(

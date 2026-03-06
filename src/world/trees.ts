@@ -22,6 +22,7 @@ export function generateTreesForChunk(coord: ChunkCoord, config: GameConfig): Tr
   const random = mulberry32(chunkSeed(coord, config.seed));
   const origin = chunkOrigin(coord, config.chunkSize);
   const minSpacing = 6.5;
+  const spawnClearRadiusSq = config.spawnClearRadius * config.spawnClearRadius;
   const trees: TreeInstanceData[] = [];
 
   for (let candidate = 0; candidate < config.treeCandidatesPerChunk; candidate += 1) {
@@ -30,6 +31,12 @@ export function generateTreesForChunk(coord: ChunkCoord, config: GameConfig): Tr
     const terrain = sampleTerrain(x, z, config);
 
     if (terrain.slope > 1.55 || terrain.density < 0.42) {
+      continue;
+    }
+
+    const spawnDx = x - config.spawnX;
+    const spawnDz = z - config.spawnZ;
+    if (spawnDx * spawnDx + spawnDz * spawnDz < spawnClearRadiusSq) {
       continue;
     }
 

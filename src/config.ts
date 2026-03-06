@@ -2,6 +2,8 @@ import type { GameConfig } from './types.ts';
 
 export const GAME_CONFIG: GameConfig = {
   seed: 1337,
+  spawnX: 32,
+  spawnZ: 32,
   chunkSize: 64,
   terrainResolution: 40,
   activeRadius: 2,
@@ -18,4 +20,5 @@ export const GAME_CONFIG: GameConfig = {
   fixedTimeStep: 1 / 60,
   maxChunkBuildsPerFrame: 2,
   treeCandidatesPerChunk: 30,
+  spawnClearRadius: 18,
 };
