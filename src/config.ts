@@ -20,7 +20,7 @@ const SHARED_CONFIG: Omit<GameConfig, 'seed'> = {
   maxPitch: Math.PI * 0.48,
   terrainBaseHeight: 4,
   terrainHeight: 26,
-  terrainContrast: 1,
+  terrainContrast: 0.6,
   fixedTimeStep: 1 / 60,
   maxChunkBuildsPerFrame: 2,
   treeCandidatesPerChunk: 30,
