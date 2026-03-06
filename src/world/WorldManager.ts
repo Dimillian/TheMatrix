@@ -10,19 +10,24 @@ import {
   type InteriorPropInstance,
   sampleInteriorHeight,
 } from './interior.ts';
+import { INTERIOR_GEOMETRY_RULES } from './rules/interiorRules.ts';
 import { sampleTerrainHeight } from './terrain.ts';
 import { generateTreesForChunk } from './trees.ts';
 
-const INTERIOR_CEILING_CLEARANCE = 8.8;
-const INTERIOR_CEILING_PANEL_HEIGHT = 0.8;
-const INTERIOR_CEILING_STRIP_HEIGHT = 0.14;
-const INTERIOR_CEILING_STRIP_GAP = 0.16;
-const INTERIOR_FLOOR_THICKNESS = 1.2;
-const INTERIOR_WALL_THICKNESS = 1.1;
-const INTERIOR_TRIM_THICKNESS = 0.3;
-const INTERIOR_PLAYER_RADIUS = 1.35;
-const INTERIOR_DOOR_CLEAR_WIDTH = 4.8;
-const INTERIOR_DOOR_CLEAR_HEIGHT = 7.2;
+const {
+  ceilingClearance: INTERIOR_CEILING_CLEARANCE,
+  ceilingPanelHeight: INTERIOR_CEILING_PANEL_HEIGHT,
+  ceilingStripHeight: INTERIOR_CEILING_STRIP_HEIGHT,
+  ceilingStripGap: INTERIOR_CEILING_STRIP_GAP,
+  floorThickness: INTERIOR_FLOOR_THICKNESS,
+  wallThickness: INTERIOR_WALL_THICKNESS,
+  trimThickness: INTERIOR_TRIM_THICKNESS,
+  playerRadius: INTERIOR_PLAYER_RADIUS,
+  door: {
+    clearWidth: INTERIOR_DOOR_CLEAR_WIDTH,
+    clearHeight: INTERIOR_DOOR_CLEAR_HEIGHT,
+  },
+} = INTERIOR_GEOMETRY_RULES;
 
 export class WorldManager {
   private readonly scene: THREE.Scene;

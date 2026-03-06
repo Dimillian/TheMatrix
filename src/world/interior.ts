@@ -1,5 +1,6 @@
 import type { ChunkCoord, GameConfig } from '../types.ts';
 import { chunkOrigin, worldToChunkCoord } from './chunks.ts';
+import { INTERIOR_LAYOUT_RULES } from './rules/interiorRules.ts';
 
 export type InteriorEdge = 'north' | 'east' | 'south' | 'west';
 export type InteriorCellKind = 'void' | 'hall' | 'junction' | 'room';
@@ -53,12 +54,19 @@ export interface InteriorLayout {
   props: InteriorPropInstance[];
 }
 
-const INTERIOR_GRID_SIZE = 8;
-const INTERIOR_CELL_SIZE = 8;
-const INTERIOR_FLOOR_HEIGHT_OFFSET = 1.25;
-const MIN_SECOND_OPENING_GAP = 3;
-const ROOM_TYPES: readonly InteriorRoomType[] = ['storage', 'server', 'maintenance', 'control'];
-const EDGE_ORDER: readonly InteriorEdge[] = ['north', 'east', 'south', 'west'];
+const {
+  gridSize: INTERIOR_GRID_SIZE,
+  cellSize: INTERIOR_CELL_SIZE,
+  floorHeightOffset: INTERIOR_FLOOR_HEIGHT_OFFSET,
+  edgeOpenings: { extraOpeningChance: EXTRA_OPENING_CHANCE, minSecondOpeningGap: MIN_SECOND_OPENING_GAP },
+  hub: HUB_RULES,
+  spine: SPINE_RULES,
+  rooms: ROOM_RULES,
+  corridors: CORRIDOR_RULES,
+  props: PROP_RULES,
+  roomTypes: ROOM_TYPES,
+  edges: EDGE_ORDER,
+} = INTERIOR_LAYOUT_RULES;
 
 function hash(seed: number, a: number, b: number, c: number): number {
   const value = Math.sin(seed * 0.013 + a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453123;
@@ -114,7 +122,7 @@ function getEdgeOpenings(
   const openings = [first];
   const extraChance = hash(config.seed, signature.axis + 1.91, signature.a, signature.b);
 
-  if (extraChance > 0.88) {
+  if (extraChance > EXTRA_OPENING_CHANCE) {
     const rawSecond =
       1 +
       Math.floor(hash(config.seed, signature.axis + 3.17, signature.a, signature.b) * (INTERIOR_GRID_SIZE - 2));
@@ -187,7 +195,7 @@ function carvePath(
 
   setWalkable(cells, x, z, roomMask, roomTypeMask, roomIdMask);
 
-  for (let step = 0; step < INTERIOR_GRID_SIZE * INTERIOR_GRID_SIZE * 3; step += 1) {
+  for (let step = 0; step < INTERIOR_GRID_SIZE * INTERIOR_GRID_SIZE * CORRIDOR_RULES.carveStepBudgetMultiplier; step += 1) {
     if (x === end.x && z === end.z) {
       break;
     }
@@ -196,7 +204,12 @@ function carvePath(
     const dz = end.z - z;
     const favorHorizontal = Math.abs(dx) > Math.abs(dz);
     const turnNoise = hash(config.seed, x + salt, z - salt, step + 0.37);
-    const useX = dx !== 0 && (dz === 0 || (favorHorizontal ? turnNoise > 0.28 : turnNoise > 0.72));
+    const useX =
+      dx !== 0 &&
+      (dz === 0 ||
+        (favorHorizontal
+          ? turnNoise > CORRIDOR_RULES.horizontalBiasThreshold
+          : turnNoise > CORRIDOR_RULES.verticalBiasThreshold));
 
     if (useX) {
       x += Math.sign(dx);
@@ -564,7 +577,11 @@ function generateHallProps(layout: InteriorLayout, cells: InteriorCell[][], conf
         }
       }
 
-      if (straightAxis && stairCount < 2 && placementChance > 0.82) {
+      if (
+        straightAxis &&
+        stairCount < PROP_RULES.maxStairsPerChunk &&
+        placementChance > PROP_RULES.stairChanceThreshold
+      ) {
         const position = worldPositionForCell(layout, x, z);
         props.push({
           kind: 'stairRun',
@@ -580,18 +597,18 @@ function generateHallProps(layout: InteriorLayout, cells: InteriorCell[][], conf
         continue;
       }
 
-      if (cell.kind === 'junction' && placementChance > 0.8) {
+      if (cell.kind === 'junction' && placementChance > PROP_RULES.junctionPillarThreshold) {
         const position = worldPositionForCell(layout, x, z);
         props.push({
           kind: 'pillar',
-          x: position.x + (placementChance > 0.9 ? -1.8 : 1.8),
+          x: position.x + (placementChance > PROP_RULES.junctionSideOffsetThreshold ? -1.8 : 1.8),
           y: layout.floorHeight + 1.75,
-          z: position.z + (placementChance > 0.86 ? -1.2 : 1.2),
+          z: position.z + (placementChance > PROP_RULES.junctionDepthOffsetThreshold ? -1.2 : 1.2),
           width: 0.9,
           height: 3.5,
           depth: 0.9,
         });
-      } else if (placementChance > 0.92) {
+      } else if (placementChance > PROP_RULES.consoleThreshold) {
         const position = worldPositionForCell(layout, x, z);
         props.push({
           kind: 'console',
@@ -642,10 +659,10 @@ export function generateInteriorLayoutForChunk(
     west: getEdgeOpenings(coord, 'west', config),
   };
   const hub = {
-    x: 2 + Math.floor(hash(config.seed, coord.x, coord.z, 1.7) * 4),
-    z: 2 + Math.floor(hash(config.seed, coord.x, coord.z, 3.9) * 4),
+    x: HUB_RULES.minInset + Math.floor(hash(config.seed, coord.x, coord.z, 1.7) * HUB_RULES.range),
+    z: HUB_RULES.minInset + Math.floor(hash(config.seed, coord.x, coord.z, 3.9) * HUB_RULES.range),
   };
-  const spineAxis = hash(config.seed, coord.x, coord.z, 4.7) > 0.5 ? 'x' : 'z';
+  const spineAxis = hash(config.seed, coord.x, coord.z, 4.7) > SPINE_RULES.axisThreshold ? 'x' : 'z';
   const rooms: InteriorRoom[] = [];
   const floorHeight = getFloorHeight(config);
   const origin = chunkOrigin(coord, config.chunkSize);
@@ -681,12 +698,22 @@ export function generateInteriorLayoutForChunk(
     }
   }
 
-  const roomTarget = 1 + Math.floor(hash(config.seed, coord.x, coord.z, 5.7) * 2);
-  for (let attempt = 0; attempt < 10 && rooms.length < roomTarget; attempt += 1) {
+  const roomTarget = ROOM_RULES.targetBase + Math.floor(hash(config.seed, coord.x, coord.z, 5.7) * ROOM_RULES.targetRange);
+  for (let attempt = 0; attempt < ROOM_RULES.maxPlacementAttempts && rooms.length < roomTarget; attempt += 1) {
     const widthRoll = hash(config.seed, coord.x + attempt, coord.z, 7.1);
     const depthRoll = hash(config.seed, coord.x, coord.z + attempt, 9.3);
-    const width = widthRoll > 0.82 ? 5 : widthRoll > 0.4 ? 4 : 3;
-    const depth = depthRoll > 0.82 ? 5 : depthRoll > 0.4 ? 4 : 3;
+    const width =
+      widthRoll > ROOM_RULES.sizeThresholds.large
+        ? ROOM_RULES.dimensions.large
+        : widthRoll > ROOM_RULES.sizeThresholds.medium
+          ? ROOM_RULES.dimensions.medium
+          : ROOM_RULES.dimensions.small;
+    const depth =
+      depthRoll > ROOM_RULES.sizeThresholds.large
+        ? ROOM_RULES.dimensions.large
+        : depthRoll > ROOM_RULES.sizeThresholds.medium
+          ? ROOM_RULES.dimensions.medium
+          : ROOM_RULES.dimensions.small;
     const x =
       1 + Math.floor(hash(config.seed, coord.x * 7 + attempt, coord.z * 3, 11.2) * (INTERIOR_GRID_SIZE - width - 1));
     const z =
@@ -725,7 +752,8 @@ export function generateInteriorLayoutForChunk(
     );
   }
 
-  const branchTarget = 1 + Math.floor(hash(config.seed, coord.x, coord.z, 17.9) * 2);
+  const branchTarget =
+    CORRIDOR_RULES.branchBase + Math.floor(hash(config.seed, coord.x, coord.z, 17.9) * CORRIDOR_RULES.branchRange);
   for (let branch = 0; branch < branchTarget; branch += 1) {
     const start = {
       x: Math.floor(hash(config.seed, coord.x + branch, coord.z, 19.1) * INTERIOR_GRID_SIZE),
@@ -740,7 +768,7 @@ export function generateInteriorLayoutForChunk(
     carvePath(cells, roomMask, roomTypeMask, roomIdMask, start, anchor, config, 27.4 + branch * 5.2);
   }
 
-  const loopTarget = Math.floor(hash(config.seed, coord.x, coord.z, 23.6) * 2);
+  const loopTarget = Math.floor(hash(config.seed, coord.x, coord.z, 23.6) * CORRIDOR_RULES.loopRange);
   for (let loop = 0; loop < loopTarget; loop += 1) {
     const first = {
       x: Math.floor(hash(config.seed, coord.x + loop * 2, coord.z, 25.4) * INTERIOR_GRID_SIZE),
@@ -757,7 +785,10 @@ export function generateInteriorLayoutForChunk(
       continue;
     }
 
-    if (Math.abs(firstAnchor.x - secondAnchor.x) + Math.abs(firstAnchor.z - secondAnchor.z) < 4) {
+    if (
+      Math.abs(firstAnchor.x - secondAnchor.x) + Math.abs(firstAnchor.z - secondAnchor.z) <
+      CORRIDOR_RULES.minLoopDistance
+    ) {
       continue;
     }
 
